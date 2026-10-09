@@ -16,6 +16,13 @@ notch/        the notch indicator (SwiftUI), driven by ~/.claude-call/state.json
 The Claude Code side is a skill in the notes bundle (`.claude/skills/call/`)
 that watches the inbox and answers each delegation.
 
+## Set up
+
+Tell your coding agent to "set this up" and point it at [SETUP.md](SETUP.md).
+It checks the prerequisites, builds the app, tests the key, personalises
+the prompt and installs the agent-side skill from `skill/` into your notes
+folder.
+
 ## Run
 
 ```bash
