@@ -16,7 +16,7 @@ notch/drive.py                    plays listening → thinking → speaking → 
 skill/SKILL.md                    generic copy of the agent-side /call procedure, installed into a notes folder by SETUP.md
 ```
 
-Runtime state lives outside the repo in `~/.claude-call/`: `inbox.jsonl`, `outbox.jsonl`, `state.json`, `transcript-<stamp>.json` per call, and `board/`.
+Runtime state lives outside the repo in `~/.claude-call/`: `context.txt` (written by the skill, optional), `inbox.jsonl`, `outbox.jsonl`, `state.json`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), and `board/`.
 
 # Commands
 
@@ -31,16 +31,17 @@ cd notch && python3 drive.py & .build/release/CallNotch   # watch the app run wi
 
 # How a call flows
 
-1. `bridge.py` opens the Live session, starts the mic and speaker streams, and launches `notch/.build/release/CallNotch` if it has been built.
+1. `bridge.py` opens the Live session (seeding `context.txt`, capped at 4000 characters, as a developer message if it exists), starts the mic and speaker streams, and launches `notch/.build/release/CallNotch` if it has been built.
 2. When the voice model delegates, the bridge appends `{"id", "offset_ms", "transcript"}` to the inbox. `transcript` is the last 12 `[role, text]` turns.
 3. The agent answers with `bridge.py say ID "..."`, which appends to the outbox. The bridge tails the outbox and forwards `say` as commentary and `note` as thinking on the Live session.
-4. Hang-up is Ctrl-C, or the voice saying the sign-off. The bridge then writes `{"event": "closed", "transcript": [...]}` to the inbox and saves the transcript file.
+4. Hang-up is Ctrl-C, the voice saying the sign-off, or 90 s idle (no mic speech above `SPEECH_LEVEL`, no audio out, no pending delegation). All three send `session.close` and wait up to `CLOSE_WAIT` for `session.closed` and its final `usage.seconds`. The bridge then writes `{"event": "closed", "seconds": ..., "transcript": [...]}` to the inbox and saves the transcript file.
 
 # Contracts that must not drift
 
 Changing any of these means changing every side in the same commit.
 
 - **`Hanging up now`**: `SIGN_OFF` in `bridge.py`, the "Ending the call" section of `prompt.txt`, and both skill files. Hearing it in the output transcript closes the session.
+- **`Dates you may answer directly`**: the heading `prompt.txt` lets the voice answer from, and the heading the skill writes into `context.txt`.
 - **`Board open:`**: the prefix `prompt.txt` tells the voice to expect on a board result, and the prefix the skill tells the agent to send.
 - **State file**: `{"state": "listening" | "thinking" | "speaking" | "off", "level": 0..1}`, written atomically (temp file + `os.replace`) every 50 ms even when unchanged. The app treats a file older than 3 s as a dead bridge and quits, and also quits on `off` or SIGTERM. `thinking` means a delegation has had no `say` yet.
 - **Inbox and outbox line shapes**, as above. The bridge truncates outbox content at 1500 characters and empties both files at call start, so an agent can count lines from zero.
@@ -58,7 +59,7 @@ Changing any of these means changing every side in the same commit.
 
 # Known gaps
 
-- The bridge does not read `session.usage.updated` or record the final `usage.seconds`, and on Ctrl-C it exits without waiting for `session.closed`.
-- Nothing closes an idle session; a forgotten call bills until Ctrl-C.
+- `SPEECH_LEVEL` (idle guard mic threshold) is a guess; tune it in a real room so typing stays below it and quiet speech stays above.
+- A delegation that never gets a `say` keeps the call from idling out; Ctrl-C still ends it.
 - Audio already queued keeps playing after the user interrupts (marked `ponytail:` in `speaker()`).
-- The session starts with instructions only; no context is seeded through `input`.
+- `seconds` is null when `session.closed` never arrives within `CLOSE_WAIT` and no usage update came before.

@@ -11,10 +11,14 @@
 
 Delegations land in ~/.claude-call/inbox.jsonl as one JSON line each:
   {"id": ..., "offset_ms": ..., "transcript": [["user"|"assistant", text], ...]}
-A final {"event": "closed"} line ends the call. Replies go through the
-outbox (written by `say` / `note`) and are forwarded to the Live session.
-During a call ~/.claude-call/state.json carries {"state", "level"} at 20 Hz
-for the notch app (notch/), which is launched here if it has been built.
+A final {"event": "closed", "seconds": ..., "transcript": [...]} line ends the
+call; `seconds` is the API's final billed audio duration (null if the close was
+never confirmed). Replies go through the outbox (written by `say` / `note`) and
+are forwarded to the Live session. During a call ~/.claude-call/state.json
+carries {"state", "level"} at 20 Hz for the notch app (notch/), which is
+launched here if it has been built. ~/.claude-call/context.txt, if present,
+seeds the session as a developer message. The call closes itself after
+IDLE_AFTER seconds with no speech, no audio out and no delegation pending.
 """
 import asyncio, base64, json, math, os, queue, subprocess, sys, threading, time
 from array import array
@@ -26,6 +30,10 @@ NOTCH_APP = Path(__file__).resolve().parent / "notch/.build/release/CallNotch"
 RATE = 24000
 INSTRUCTIONS = (Path(__file__).resolve().parent / "prompt.txt").read_text()
 SIGN_OFF = "Hanging up now"  # prompt.txt makes the voice end every goodbye with this; hearing it closes the session
+SPEECH_LEVEL = 0.15  # ponytail: mic rms (see rms()) that counts as speech for the idle guard; tune in a real room so typing stays below it
+IDLE_AFTER = 90  # seconds with no speech, no audio out and no pending delegation before the bridge hangs up
+CLOSE_WAIT = 5  # seconds to wait for session.closed after closing, so a dead socket cannot hang the exit
+CONTEXT_CAP = 4000  # characters of context.txt sent at start; the server caps the seed at 8,192 tokens
 
 
 def append_outbox(kind: str, delegation_id: str, content: str) -> None:
@@ -37,6 +45,23 @@ def append_outbox(kind: str, delegation_id: str, content: str) -> None:
 def write_inbox(obj: dict) -> None:
     with INBOX.open("a") as f:
         f.write(json.dumps(obj) + "\n")
+
+
+def seed() -> dict:
+    """session.start fields seeding context.txt as a developer message; {} when there is no file."""
+    f = STATE / "context.txt"
+    text = f.read_text()[:CONTEXT_CAP].strip() if f.exists() else ""
+    return {"input": [{"type": "message", "role": "developer", "content": [{"type": "input_text", "text": text}]}]} if text else {}
+
+
+def is_idle(now: float, active_at: float, spk_at: float, pending: bool) -> bool:
+    """A pending delegation is never idle; otherwise idle once nothing was heard or played for IDLE_AFTER s."""
+    return not pending and now - max(active_at, spk_at) > IDLE_AFTER
+
+
+def write_closed(transcript: list, seconds: float | None) -> None:
+    write_inbox({"event": "closed", "seconds": seconds, "transcript": transcript})
+    (STATE / f"transcript-{time.strftime('%Y%m%dT%H%M')}.json").write_text(json.dumps({"seconds": seconds, "transcript": transcript}, indent=1))
 
 
 def rms(chunk: bytes) -> float:
@@ -62,12 +87,14 @@ async def call() -> None:
     mic: asyncio.Queue[bytes] = asyncio.Queue()
     spk: queue.Queue[bytes | None] = queue.Queue()
     transcript: list[list[str]] = []  # [role, text]
-    live = {"mic": 0.0, "spk": 0.0, "spk_at": 0.0}  # levels for the notch, written from the audio threads
+    live = {"mic": 0.0, "spk": 0.0, "spk_at": 0.0, "active_at": time.monotonic()}  # levels for the notch, written from the audio threads
     pending: set[str] = set()  # delegations still waiting for their first `say`
-    notch = None
+    notch, seconds, reason, main = None, None, None, asyncio.current_task()
 
     def on_mic(indata, frames, t, status):
         live["mic"] = rms(bytes(indata))
+        if live["mic"] > SPEECH_LEVEL:
+            live["active_at"] = time.monotonic()
         loop.call_soon_threadsafe(mic.put_nowait, bytes(indata))
 
     def speaker():
@@ -102,13 +129,21 @@ async def call() -> None:
                 await res.append(content=msg["content"], delegation_id=msg["delegation_id"])
                 if msg["kind"] == "say":
                     pending.discard(msg["delegation_id"])
+                    live["active_at"] = time.monotonic()  # restart the idle clock: the answer is about to play
                 print(f"→ live [{msg['kind']}] {msg['content'][:80]}")
 
     async def hang_up(conn):
         while not spk.empty() or time.monotonic() - live["spk_at"] < 0.8:  # let the goodbye finish playing
             await asyncio.sleep(0.1)
         print("sign-off heard, closing")
-        await conn.session.close()
+        main.cancel()  # same exit as Ctrl-C: close, then wait for session.closed
+
+    async def guard_idle():
+        # ponytail: a delegation that never gets a `say` keeps the call open; Ctrl-C still ends it
+        while not is_idle(time.monotonic(), live["active_at"], live["spk_at"], bool(pending)):
+            await asyncio.sleep(1)
+        print(f"idle for {IDLE_AFTER} s (no speech, no audio, nothing pending), closing")
+        main.cancel()
 
     async def pump_state():
         while True:  # rewritten every tick even when unchanged: the app treats a 3 s old file as a dead bridge
@@ -124,6 +159,7 @@ async def call() -> None:
             "model": "gpt-live-1",
             "delegation": {"type": "client"},
             "instructions": INSTRUCTIONS,
+            **seed(),
             "audio": {"format": {"type": "audio/pcm", "rate": RATE}},
         })
         tasks = []
@@ -136,7 +172,7 @@ async def call() -> None:
                         write_state("listening", 0.0)
                         if NOTCH_APP.exists():
                             notch = subprocess.Popen([NOTCH_APP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        tasks = [asyncio.create_task(f(conn)) for f in (pump_mic, pump_outbox)] + [asyncio.create_task(pump_state())]
+                        tasks = [asyncio.create_task(f(conn)) for f in (pump_mic, pump_outbox)] + [asyncio.create_task(f()) for f in (pump_state, guard_idle)]
                     elif t == "session.output_audio.delta":
                         spk.put(base64.b64decode(ev.delta))
                     elif t == "session.input_transcript.delta":
@@ -149,10 +185,12 @@ async def call() -> None:
                         print(f"← delegation {ev.delegation.id}: {transcript[-1][1][:80] if transcript else ''}")
                         write_inbox({"id": ev.delegation.id, "offset_ms": ev.offset_ms, "transcript": transcript[-12:]})
                         pending.add(ev.delegation.id)
+                    elif t == "session.usage.updated":
+                        seconds = ev.usage.seconds  # cumulative: replace, never sum
                     elif t == "error":
                         print("error:", ev.error)
                     elif t == "session.closed":
-                        print("closed:", ev.reason)
+                        seconds, reason = ev.usage.seconds, ev.reason
                         break
         except (KeyboardInterrupt, asyncio.CancelledError):
             await conn.session.close()
@@ -163,8 +201,17 @@ async def call() -> None:
             write_state("off", 0.0)
             if notch:
                 notch.terminate()  # the app collapses its tab on SIGTERM, then exits
-            write_inbox({"event": "closed", "transcript": transcript})
-            (STATE / f"transcript-{time.strftime('%Y%m%dT%H%M')}.json").write_text(json.dumps(transcript, indent=1))
+            if not reason:  # close sent but not confirmed: read on until session.closed brings the final usage
+                try:
+                    async with asyncio.timeout(CLOSE_WAIT):
+                        while (ev := await conn.recv()).type != "session.closed":
+                            if ev.type == "session.usage.updated":
+                                seconds = ev.usage.seconds
+                    seconds, reason = ev.usage.seconds, ev.reason
+                except Exception as e:  # timeout or dead socket: keep the last usage update
+                    reason = f"no session.closed ({type(e).__name__})"
+            print(f"closed: {reason}, {seconds} s billed")
+            write_closed(transcript, seconds)
 
 
 def selftest() -> None:
@@ -179,6 +226,14 @@ def selftest() -> None:
     assert rms(b"") == 0 and rms(array("h", [3000, -3000]).tobytes()) == 0.5 and rms(array("h", [32767]).tobytes()) == 1
     write_state("thinking", 0.0)
     assert json.loads(STATE_FILE.read_text()) == {"state": "thinking", "level": 0.0}
+    assert seed() == {}
+    (STATE / "context.txt").write_text("y" * 5000)
+    assert seed()["input"] == [{"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "y" * CONTEXT_CAP}]}]
+    assert not is_idle(100, 50, 0, False) and is_idle(200, 50, 100, False) and not is_idle(200, 50, 150, False)
+    assert not is_idle(1000, 0, 0, True)  # a pending delegation is never idle
+    write_closed([["user", "bye"]], 42.5)
+    assert json.loads(INBOX.read_text().splitlines()[-1]) == {"event": "closed", "seconds": 42.5, "transcript": [["user", "bye"]]}
+    assert json.loads(next(STATE.glob("transcript-*.json")).read_text())["seconds"] == 42.5
     print("ok")
 
 
