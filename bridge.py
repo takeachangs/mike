@@ -1,0 +1,197 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["openai>=3.27", "sounddevice", "websockets"]
+# ///
+"""Voice bridge: GPT-Live on the mic/speaker, Claude Code as the backend.
+
+  uv run bridge.py                 start a call (Ctrl-C hangs up)
+  uv run bridge.py say  ID "text"  spoken result for delegation ID
+  uv run bridge.py note ID "text"  quiet progress for delegation ID
+  uv run bridge.py selftest
+
+Delegations land in ~/.claude-call/inbox.jsonl as one JSON line each:
+  {"id": ..., "offset_ms": ..., "transcript": [["user"|"assistant", text], ...]}
+A final {"event": "closed"} line ends the call. Replies go through the
+outbox (written by `say` / `note`) and are forwarded to the Live session.
+During a call ~/.claude-call/state.json carries {"state", "level"} at 20 Hz
+for the notch app (notch/), which is launched here if it has been built.
+"""
+import asyncio, base64, json, math, os, queue, subprocess, sys, threading, time
+from array import array
+from pathlib import Path
+
+STATE = Path.home() / ".claude-call"
+INBOX, OUTBOX, STATE_FILE = STATE / "inbox.jsonl", STATE / "outbox.jsonl", STATE / "state.json"
+NOTCH_APP = Path(__file__).resolve().parent / "notch/.build/release/CallNotch"
+RATE = 24000
+INSTRUCTIONS = (Path(__file__).resolve().parent / "prompt.txt").read_text()
+SIGN_OFF = "Hanging up now"  # prompt.txt makes the voice end every goodbye with this; hearing it closes the session
+
+
+def append_outbox(kind: str, delegation_id: str, content: str) -> None:
+    STATE.mkdir(exist_ok=True)
+    with OUTBOX.open("a") as f:
+        f.write(json.dumps({"kind": kind, "delegation_id": delegation_id, "content": content[:1500]}) + "\n")
+
+
+def write_inbox(obj: dict) -> None:
+    with INBOX.open("a") as f:
+        f.write(json.dumps(obj) + "\n")
+
+
+def rms(chunk: bytes) -> float:
+    """RMS of int16 PCM, scaled so normal speech lands around 0.5-0.8."""
+    a = array("h", chunk)
+    return min(1.0, math.sqrt(sum(x * x for x in a) / max(len(a), 1)) / 6000)
+
+
+def write_state(state: str, level: float) -> None:
+    tmp = STATE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"state": state, "level": round(level, 3)}))
+    os.replace(tmp, STATE_FILE)  # atomic: the notch app never reads half a file
+
+
+async def call() -> None:
+    import sounddevice as sd
+    from openai import AsyncOpenAI
+
+    STATE.mkdir(exist_ok=True)
+    INBOX.write_text("")
+    OUTBOX.write_text("")
+    loop = asyncio.get_running_loop()
+    mic: asyncio.Queue[bytes] = asyncio.Queue()
+    spk: queue.Queue[bytes | None] = queue.Queue()
+    transcript: list[list[str]] = []  # [role, text]
+    live = {"mic": 0.0, "spk": 0.0, "spk_at": 0.0}  # levels for the notch, written from the audio threads
+    pending: set[str] = set()  # delegations still waiting for their first `say`
+    notch = None
+
+    def on_mic(indata, frames, t, status):
+        live["mic"] = rms(bytes(indata))
+        loop.call_soon_threadsafe(mic.put_nowait, bytes(indata))
+
+    def speaker():
+        # ponytail: leftover audio still plays after an interruption; flush the queue on input_transcript if it bothers you
+        with sd.RawOutputStream(samplerate=RATE, channels=1, dtype="int16") as out:
+            while (chunk := spk.get()) is not None:
+                # 100 ms slices, timed at playback: deltas arrive faster than real time, so arrival would end "speaking" early
+                for i in range(0, len(chunk), RATE // 5):
+                    live["spk"], live["spk_at"] = rms(chunk[i:i + RATE // 5]), time.monotonic()
+                    out.write(chunk[i:i + RATE // 5])
+
+    def add(role: str, delta: str) -> None:
+        if transcript and transcript[-1][0] == role:
+            transcript[-1][1] += delta
+        else:
+            transcript.append([role, delta])
+            del transcript[:-40]
+
+    async def pump_mic(conn):
+        while True:
+            await conn.session.input_audio.append(audio=base64.b64encode(await mic.get()).decode())
+
+    async def pump_outbox(conn):
+        with OUTBOX.open() as f:
+            while True:
+                line = f.readline()
+                if not line:
+                    await asyncio.sleep(0.2)
+                    continue
+                msg = json.loads(line)
+                res = {"say": conn.session.commentary, "note": conn.session.thinking}[msg["kind"]]
+                await res.append(content=msg["content"], delegation_id=msg["delegation_id"])
+                if msg["kind"] == "say":
+                    pending.discard(msg["delegation_id"])
+                print(f"→ live [{msg['kind']}] {msg['content'][:80]}")
+
+    async def hang_up(conn):
+        while not spk.empty() or time.monotonic() - live["spk_at"] < 0.8:  # let the goodbye finish playing
+            await asyncio.sleep(0.1)
+        print("sign-off heard, closing")
+        await conn.session.close()
+
+    async def pump_state():
+        while True:  # rewritten every tick even when unchanged: the app treats a 3 s old file as a dead bridge
+            speaking = time.monotonic() - live["spk_at"] < 0.3
+            s = "thinking" if pending else "speaking" if speaking else "listening"
+            write_state(s, 0.0 if pending else live["spk"] if speaking else live["mic"])
+            await asyncio.sleep(0.05)
+
+    client = AsyncOpenAI()
+    threading.Thread(target=speaker, daemon=True).start()
+    async with client.live.connect() as conn:
+        await conn.session.start(session={
+            "model": "gpt-live-1",
+            "delegation": {"type": "client"},
+            "instructions": INSTRUCTIONS,
+            "audio": {"format": {"type": "audio/pcm", "rate": RATE}},
+        })
+        tasks = []
+        try:
+            with sd.RawInputStream(samplerate=RATE, channels=1, dtype="int16", blocksize=RATE // 10, callback=on_mic):
+                async for ev in conn:
+                    t = ev.type
+                    if t == "session.started":
+                        print("call started, talk. Ctrl-C hangs up.")
+                        write_state("listening", 0.0)
+                        if NOTCH_APP.exists():
+                            notch = subprocess.Popen([NOTCH_APP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        tasks = [asyncio.create_task(f(conn)) for f in (pump_mic, pump_outbox)] + [asyncio.create_task(pump_state())]
+                    elif t == "session.output_audio.delta":
+                        spk.put(base64.b64decode(ev.delta))
+                    elif t == "session.input_transcript.delta":
+                        add("user", ev.delta)
+                    elif t == "session.output_transcript.delta":
+                        add("assistant", ev.delta)
+                        if SIGN_OFF in transcript[-1][1] and not any(x.get_name() == "hangup" for x in tasks):
+                            tasks.append(asyncio.create_task(hang_up(conn), name="hangup"))
+                    elif t == "session.delegation.created":
+                        print(f"← delegation {ev.delegation.id}: {transcript[-1][1][:80] if transcript else ''}")
+                        write_inbox({"id": ev.delegation.id, "offset_ms": ev.offset_ms, "transcript": transcript[-12:]})
+                        pending.add(ev.delegation.id)
+                    elif t == "error":
+                        print("error:", ev.error)
+                    elif t == "session.closed":
+                        print("closed:", ev.reason)
+                        break
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            await conn.session.close()
+        finally:
+            for task in tasks:
+                task.cancel()
+            spk.put(None)
+            write_state("off", 0.0)
+            if notch:
+                notch.terminate()  # the app collapses its tab on SIGTERM, then exits
+            write_inbox({"event": "closed", "transcript": transcript})
+            (STATE / f"transcript-{time.strftime('%Y%m%dT%H%M')}.json").write_text(json.dumps(transcript, indent=1))
+
+
+def selftest() -> None:
+    import tempfile
+    global STATE, INBOX, OUTBOX, STATE_FILE
+    STATE = Path(tempfile.mkdtemp()); INBOX, OUTBOX, STATE_FILE = STATE / "inbox.jsonl", STATE / "outbox.jsonl", STATE / "state.json"
+    append_outbox("say", "item_1", "x" * 2000)
+    write_inbox({"id": "item_1", "transcript": [["user", "hi"]]})
+    out = json.loads(OUTBOX.read_text())
+    assert out == {"kind": "say", "delegation_id": "item_1", "content": "x" * 1500}, out
+    assert json.loads(INBOX.read_text())["id"] == "item_1"
+    assert rms(b"") == 0 and rms(array("h", [3000, -3000]).tobytes()) == 0.5 and rms(array("h", [32767]).tobytes()) == 1
+    write_state("thinking", 0.0)
+    assert json.loads(STATE_FILE.read_text()) == {"state": "thinking", "level": 0.0}
+    print("ok")
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if not a:
+        try:
+            asyncio.run(call())
+        except KeyboardInterrupt:
+            pass
+    elif a[0] in ("say", "note") and len(a) == 3:
+        append_outbox(a[0], a[1], a[2])
+    elif a[0] == "selftest":
+        selftest()
+    else:
+        sys.exit(__doc__)
