@@ -15,12 +15,13 @@ A final {"event": "closed", "seconds": ..., "transcript": [...]} line ends the
 call; `seconds` is the API's final billed audio duration (null if the close was
 never confirmed). Replies go through the outbox (written by `say` / `note`) and
 are forwarded to the Live session. During a call ~/.claude-call/state.json
-carries {"state", "level"} at 20 Hz for the notch app (notch/), which is
-launched here if it has been built. ~/.claude-call/context.txt, if present,
+carries {"state", "level", "muted"} at 20 Hz for the notch app (notch/), which
+is launched here if it has been built; its buttons signal this process
+(SIGUSR1 toggles mute, SIGINT hangs up). ~/.claude-call/context.txt, if present,
 seeds the session as a developer message. The call closes itself after
 IDLE_AFTER seconds with no speech, no audio out and no delegation pending.
 """
-import asyncio, base64, json, math, os, queue, subprocess, sys, threading, time
+import asyncio, base64, json, math, os, queue, signal, subprocess, sys, threading, time
 from array import array
 from pathlib import Path
 
@@ -70,9 +71,9 @@ def rms(chunk: bytes) -> float:
     return min(1.0, math.sqrt(sum(x * x for x in a) / max(len(a), 1)) / 6000)
 
 
-def write_state(state: str, level: float) -> None:
+def write_state(state: str, level: float, muted: bool = False) -> None:
     tmp = STATE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"state": state, "level": round(level, 3)}))
+    tmp.write_text(json.dumps({"state": state, "level": round(level, 3), "muted": muted}))
     os.replace(tmp, STATE_FILE)  # atomic: the notch app never reads half a file
 
 
@@ -87,7 +88,7 @@ async def call() -> None:
     mic: asyncio.Queue[bytes] = asyncio.Queue()
     spk: queue.Queue[bytes | None] = queue.Queue()
     transcript: list[list[str]] = []  # [role, text]
-    live = {"mic": 0.0, "spk": 0.0, "spk_at": 0.0, "active_at": time.monotonic()}  # levels for the notch, written from the audio threads
+    live = {"mic": 0.0, "spk": 0.0, "spk_at": 0.0, "active_at": time.monotonic(), "muted": False}  # levels for the notch, written from the audio threads
     pending: set[str] = set()  # delegations still waiting for their first `say`
     notch, seconds, reason, main = None, None, None, asyncio.current_task()
 
@@ -145,11 +146,16 @@ async def call() -> None:
         print(f"idle for {IDLE_AFTER} s (no speech, no audio, nothing pending), closing")
         main.cancel()
 
+    async def toggle_mute(conn):  # SIGUSR1 from the notch app's mute button; SIGINT from its hang-up button is plain Ctrl-C
+        await (conn.session.input_audio.unmute() if live["muted"] else conn.session.input_audio.mute())
+        live["muted"] = not live["muted"]
+        print("mic muted" if live["muted"] else "mic live")
+
     async def pump_state():
         while True:  # rewritten every tick even when unchanged: the app treats a 3 s old file as a dead bridge
             speaking = time.monotonic() - live["spk_at"] < 0.3
             s = "thinking" if pending else "speaking" if speaking else "listening"
-            write_state(s, 0.0 if pending else live["spk"] if speaking else live["mic"])
+            write_state(s, 0.0 if pending else live["spk"] if speaking else live["mic"], live["muted"])
             await asyncio.sleep(0.05)
 
     client = AsyncOpenAI()
@@ -171,7 +177,9 @@ async def call() -> None:
                         print("call started, talk. Ctrl-C hangs up.")
                         write_state("listening", 0.0)
                         if NOTCH_APP.exists():
-                            notch = subprocess.Popen([NOTCH_APP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            notch = subprocess.Popen([NOTCH_APP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                                     env={**os.environ, "CALL_BRIDGE_PID": str(os.getpid())})  # its buttons signal us
+                        loop.add_signal_handler(signal.SIGUSR1, lambda: asyncio.create_task(toggle_mute(conn)))
                         tasks = [asyncio.create_task(f(conn)) for f in (pump_mic, pump_outbox)] + [asyncio.create_task(f()) for f in (pump_state, guard_idle)]
                     elif t == "session.output_audio.delta":
                         spk.put(base64.b64decode(ev.delta))
@@ -225,7 +233,7 @@ def selftest() -> None:
     assert json.loads(INBOX.read_text())["id"] == "item_1"
     assert rms(b"") == 0 and rms(array("h", [3000, -3000]).tobytes()) == 0.5 and rms(array("h", [32767]).tobytes()) == 1
     write_state("thinking", 0.0)
-    assert json.loads(STATE_FILE.read_text()) == {"state": "thinking", "level": 0.0}
+    assert json.loads(STATE_FILE.read_text()) == {"state": "thinking", "level": 0.0, "muted": False}
     assert seed() == {}
     (STATE / "context.txt").write_text("y" * 5000)
     assert seed()["input"] == [{"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "y" * CONTEXT_CAP}]}]

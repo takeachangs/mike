@@ -59,7 +59,7 @@ Build once and after editing `notch/Sources/`:
 cd ~/projects/call-notch/notch && swift build -c release
 ```
 
-To try it without a call: `python3 drive.py & .build/release/CallNotch` from `notch/`.
+To try it without a call: `python3 drive.py` from `notch/`, which launches the app against a fake bridge.
 
 ## Notes
 
