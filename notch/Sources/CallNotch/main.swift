@@ -2,6 +2,7 @@
 // Reads ~/.claude-call/state.json ({"state": off|listening|thinking|speaking, "level": 0...1, "muted": bool?}) written by bridge.py.
 // Clicking the tab drops a call card from the notch (the `.wide` variant of notch/prototype-expansion.html):
 // state, elapsed time, mute (SIGUSR1 to $CALL_BRIDGE_PID) and hang up (SIGINT).
+// CALL_NOTCH_MODE=listen (set by Listen) relabels the same card as a recorder: Recording/Paused, pause/play, stop.
 import AppKit
 import SwiftUI
 
@@ -11,6 +12,7 @@ let amber = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
 let tabWidth = 42.0, ear = 10.0, overlap = 12.0  // overlap: black drawn under the notch so its rounded corner fills in
 let cardHeight = 116.0, launched = Date()
 let bridgePID = env["CALL_BRIDGE_PID"].flatMap { pid_t($0) }
+let recorder = env["CALL_NOTCH_MODE"] == "listen"
 
 func signalBridge(_ sig: Int32, _ name: String) {
     if let pid = bridgePID { kill(pid, sig) } else { print("no CALL_BRIDGE_PID: would send \(name)") }
@@ -201,14 +203,14 @@ struct NotchView: View {
     func card(_ now: Date) -> some View {
         let s = Int(now.timeIntervalSince(launched))
         return VStack(spacing: 10) {
-            reveal(Text(m.muted ? "Muted" : m.state.capitalized).font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)), after: 0.11)
+            reveal(Text(recorder ? (m.muted ? "Paused" : "Recording") : m.muted ? "Muted" : m.state.capitalized).font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)), after: 0.11)
             reveal(Text(String(format: "%02d:%02d", s / 60, s % 60)).font(.system(size: 26, weight: .medium)).monospacedDigit()
                 .tracking(-0.26).frame(height: 26), after: 0.11)
             reveal(HStack(spacing: 16) {
                 mute(now)
-                Button { signalBridge(SIGINT, "SIGINT (hang up)"); m.setOpen(false) } label: { Image(systemName: "phone.down.fill") }
+                Button { signalBridge(SIGINT, "SIGINT (hang up)"); m.setOpen(false) } label: { Image(systemName: recorder ? "stop.fill" : "phone.down.fill") }
                     .buttonStyle(Round(fill: Color(red: 1, green: 0x3B / 255, blue: 0x30 / 255), lit: Color(red: 1, green: 0x55 / 255, blue: 0x4A / 255)))
-                    .accessibilityLabel("Hang up")
+                    .accessibilityLabel(recorder ? "Stop" : "Hang up")
             }.padding(.top, 4), after: 0.15)
         }
         .foregroundStyle(.white)
@@ -230,11 +232,11 @@ struct NotchView: View {
         let k = now.timeIntervalSince(m.mutedAt) / 0.12, shown = k < 1 ? !m.muted : m.muted
         let v = k < 1 ? 1 - cssEase(k, 0, 0, 0.58, 1) : cssEase(min(k - 1, 1), 0, 0, 0.58, 1)
         return Button { signalBridge(SIGUSR1, "SIGUSR1 (mute)") } label: {
-            Image(systemName: shown ? "mic.slash.fill" : "mic.fill").foregroundStyle(m.muted ? Color.black : .white)
+            Image(systemName: recorder ? (shown ? "play.fill" : "pause.fill") : shown ? "mic.slash.fill" : "mic.fill").foregroundStyle(m.muted ? Color.black : .white)
                 .opacity(v).scaleEffect(m.reduce ? 1 : 0.9 + 0.1 * v)
         }
         .buttonStyle(Round(fill: m.muted ? .white : .white.opacity(0.14), lit: m.muted ? .white : .white.opacity(0.22)))
-        .accessibilityLabel(m.muted ? "Unmute" : "Mute")
+        .accessibilityLabel(recorder ? (m.muted ? "Resume" : "Pause") : m.muted ? "Unmute" : "Mute")
     }
 }
 
