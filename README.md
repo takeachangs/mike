@@ -43,3 +43,16 @@ call: `cd notch && python3 drive.py & .build/release/CallNotch`.
 `level` is the mic or speaker RMS in 0–1. The app quits on `off` or when the
 file goes stale for 3 s. Saying "Hanging up now." (the prompt's fixed
 sign-off) closes the session.
+
+## /listen
+
+`listen/` is a second, separate feature: it transcribes a lecture live on
+the Mac (Parakeet Ultra on the Neural Engine, no audio saved, nothing
+uploaded) into `~/.claude-call/listen-<stamp>.txt`, one paragraph per
+clock minute, and shows it in the notch (mute pauses, hang-up stops). The
+agent-side skill (`skill/listen/`) starts it and writes a summary, key
+points and to-dos next to the transcript when it stops.
+
+```bash
+cd listen && swift build -c release        # once, and after editing Sources/
+```

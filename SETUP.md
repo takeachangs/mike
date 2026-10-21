@@ -124,6 +124,27 @@ to be woken when a line is appended to a file (a file watcher or a
 `tail -F` the agent can wait on). If the tool has neither, the fallback is
 in `skill/SKILL.md` under "Without a watcher".
 
+## 5b. Optional: /listen
+
+Live lecture transcription on the Mac, shown in the same notch. Build the
+recorder (the first build fetches FluidAudio and takes a few minutes):
+
+```bash
+cd ~/projects/call-notch/listen && swift build -c release
+```
+
+Copy `skill/listen/SKILL.md` to `<notes>/.claude/skills/listen/SKILL.md`
+(or the tool's equivalent, as in step 5). To check it without the
+microphone, play any speech recording through it in real time:
+
+```bash
+~/projects/call-notch/listen/.build/release/Listen /tmp/listen-test.txt --file speech.wav
+```
+
+The first run downloads the model (about 600 MB). Expect the notch tab
+while it plays and `/tmp/listen-test.txt` with paragraphs starting
+`HH:MM`.
+
 ## 6. First call
 
 With the agent session open on the notes folder, the person says "start a
