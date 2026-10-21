@@ -49,10 +49,17 @@ sign-off) closes the session.
 `listen/` is a second, separate feature: it transcribes a lecture live on
 the Mac (Parakeet Ultra on the Neural Engine, no audio saved, nothing
 uploaded) into `~/.claude-call/listen-<stamp>.txt`, one paragraph per
-clock minute, and shows it in the notch (mute pauses, hang-up stops). The
+clock minute, and shows it in the notch (its pause and stop buttons). The
 agent-side skill (`skill/listen/`) starts it and writes a summary, key
 points and to-dos next to the transcript when it stops.
 
 ```bash
 cd listen && swift build -c release        # once, and after editing Sources/
 ```
+
+## Sounds
+
+Both the call and `/listen` play short, quiet cues from `sounds/` (start,
+pause, stop, waiting, answer ready). `CALL_SOUND_VOLUME` sets the level
+(`afplay -v`, default 0.25) and `0` turns them off. `sounds/make.py`
+renders them with [earshot](https://github.com/Leonxlnx/earshot)'s DSP.
