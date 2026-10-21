@@ -14,6 +14,7 @@ prompt.txt                        the voice model's instructions, read once at b
 notch/Sources/CallNotch/main.swift  the notch indicator (SwiftUI in an NSPanel), one file
 notch/drive.py                    fake bridge: launches the app, cycles states into state.json, answers its mute/hang-up signals; test without a call
 listen/Sources/Listen/main.swift  the /listen recorder: mic -> Parakeet Ultra on the Neural Engine -> per-minute timestamped transcript; drives the notch like the bridge (one file, FluidAudio its only dependency)
+sounds/*.wav, sounds/make.py      the cues both sides play (start, pause, stop, wait, ready) and the script that renders them (needs an earshot install; not a runtime dependency)
 skill/SKILL.md                    generic copy of the agent-side /call procedure, installed into a notes folder by SETUP.md
 skill/listen/SKILL.md             generic copy of the agent-side /listen procedure
 ```
@@ -49,6 +50,7 @@ Changing any of these means changing every side in the same commit.
 - **`Board open:`**: the prefix `prompt.txt` tells the voice to expect on a board result, and the prefix the skill tells the agent to send.
 - **State file**: `{"state": "listening" | "thinking" | "speaking" | "off", "level": 0..1, "muted": bool}`, written atomically (temp file + `os.replace`, or `Data.write(options: .atomic)` in `Listen`) every 50 ms even when unchanged. `Listen` only ever writes `listening` and `off`, with `muted` meaning paused. The app treats a file older than 3 s as a dead bridge and quits, and also quits on `off` or SIGTERM. `thinking` means a delegation has had no `say` yet. `muted` is the server-side mic mute, so the app shows what the bridge actually did.
 - **App → bridge signals**: the bridge launches the app with `CALL_BRIDGE_PID` in its environment. The app's mute button sends SIGUSR1 (bridge toggles `session.input_audio.mute`/`unmute`), its hang-up button sends SIGINT (the Ctrl-C path). Without the variable the buttons only print. `Listen` launches the app the same way, plus `CALL_NOTCH_MODE=listen` so the card reads Recording/Paused with pause/play and stop icons, and answers the same signals: SIGUSR1 pauses (audio replaced by silence so the minute stamps stay on the clock), SIGINT stops. Without `CALL_NOTCH_MODE` the card looks like a call.
+- **Cue sounds**: `start` (also resume), `pause`, `stop`, `wait`, `ready` in `sounds/`, played with `afplay -v $CALL_SOUND_VOLUME` (default 0.25, `0` = off) by `bridge.py` (call start, mute/unmute, each delegation, its first `say`, hang-up), `Listen` (start, pause/resume, stop) and the listen skill (`ready` once the notes are written). A renamed file means changing all three; `selftest` checks the files exist.
 - **Inbox and outbox line shapes**, as above. The bridge truncates outbox content at 1500 characters and empties both files at call start, so an agent can count lines from zero.
 - **Audio**: 24 kHz mono int16 PCM both ways.
 

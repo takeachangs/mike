@@ -40,10 +40,15 @@ The recorder lives in `~/projects/call-notch/listen`. It transcribes the microph
 
    The transcript is automatic speech recognition: fix obviously misheard words from context, and leave anything you are unsure of as it is. Write nowhere else unless the person asks.
 
-5. Tell the person, in a few lines: how long it ran, the to-dos, and the paths of both files.
+5. Play the ready cue so the person knows the notes are there, then tell them, in a few lines: how long it ran, the to-dos, and the paths of both files.
+
+   ```bash
+   afplay -v "${CALL_SOUND_VOLUME:-0.25}" ~/projects/call-notch/sounds/ready.wav
+   ```
 
 ## Notes
 
+- The recorder plays its own quiet cues from `sounds/` when it starts, pauses, resumes and stops. `CALL_SOUND_VOLUME` sets the level (default 0.25) and `0` turns them off.
 - `/listen` and `/call` both drive the notch through `~/.claude-call/state.json`, so run one at a time.
 - While paused, the audio is replaced by silence, so the minute stamps stay on the clock; the paused stretch is simply missing from the transcript.
 - To test without the microphone: `Listen <out.txt> --file recording.wav` plays a recording through the same path in real time.

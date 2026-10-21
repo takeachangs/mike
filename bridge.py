@@ -20,6 +20,9 @@ is launched here if it has been built; its buttons signal this process
 (SIGUSR1 toggles mute, SIGINT hangs up). ~/.claude-call/context.txt, if present,
 seeds the session as a developer message. The call closes itself after
 IDLE_AFTER seconds with no speech, no audio out and no delegation pending.
+Short cues from sounds/ play quietly at call start, mute and unmute, each
+delegation, its first answer and hang-up; CALL_SOUND_VOLUME (afplay -v,
+default 0.25) sets the level and 0 turns them off.
 """
 import asyncio, base64, json, math, os, queue, signal, subprocess, sys, threading, time
 from array import array
@@ -28,6 +31,9 @@ from pathlib import Path
 STATE = Path.home() / ".claude-call"
 INBOX, OUTBOX, STATE_FILE = STATE / "inbox.jsonl", STATE / "outbox.jsonl", STATE / "state.json"
 NOTCH_APP = Path(__file__).resolve().parent / "notch/.build/release/CallNotch"
+SOUNDS = Path(__file__).resolve().parent / "sounds"
+CUES = ("start", "pause", "stop", "wait", "ready")  # sounds/<name>.wav, rendered by sounds/make.py; Listen plays the same files
+VOLUME = os.environ.get("CALL_SOUND_VOLUME", "0.25")  # afplay -v: quiet by default, 0 turns the cues off
 RATE = 24000
 INSTRUCTIONS = (Path(__file__).resolve().parent / "prompt.txt").read_text()
 SIGN_OFF = "Hanging up now"  # prompt.txt makes the voice end every goodbye with this; hearing it closes the session
@@ -41,6 +47,15 @@ def append_outbox(kind: str, delegation_id: str, content: str) -> None:
     STATE.mkdir(exist_ok=True)
     with OUTBOX.open("a") as f:
         f.write(json.dumps({"kind": kind, "delegation_id": delegation_id, "content": content[:1500]}) + "\n")
+
+
+def cue(name: str) -> None:
+    """Play sounds/<name>.wav without waiting. A missing file or player is skipped: a cue never breaks the call."""
+    if float(VOLUME) > 0 and (f := SOUNDS / f"{name}.wav").exists():
+        try:
+            subprocess.Popen(["afplay", "-v", VOLUME, str(f)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
 
 
 def write_inbox(obj: dict) -> None:
@@ -129,6 +144,8 @@ async def call() -> None:
                 res = {"say": conn.session.commentary, "note": conn.session.thinking}[msg["kind"]]
                 await res.append(content=msg["content"], delegation_id=msg["delegation_id"])
                 if msg["kind"] == "say":
+                    if msg["delegation_id"] in pending:
+                        cue("ready")  # first answer to a delegation
                     pending.discard(msg["delegation_id"])
                     live["active_at"] = time.monotonic()  # restart the idle clock: the answer is about to play
                 print(f"→ live [{msg['kind']}] {msg['content'][:80]}")
@@ -149,6 +166,7 @@ async def call() -> None:
     async def toggle_mute(conn):  # SIGUSR1 from the notch app's mute button; SIGINT from its hang-up button is plain Ctrl-C
         await (conn.session.input_audio.unmute() if live["muted"] else conn.session.input_audio.mute())
         live["muted"] = not live["muted"]
+        cue("pause" if live["muted"] else "start")
         print("mic muted" if live["muted"] else "mic live")
 
     async def pump_state():
@@ -175,6 +193,7 @@ async def call() -> None:
                     t = ev.type
                     if t == "session.started":
                         print("call started, talk. Ctrl-C hangs up.")
+                        cue("start")
                         write_state("listening", 0.0)
                         if NOTCH_APP.exists():
                             notch = subprocess.Popen([NOTCH_APP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -193,6 +212,7 @@ async def call() -> None:
                         print(f"← delegation {ev.delegation.id}: {transcript[-1][1][:80] if transcript else ''}")
                         write_inbox({"id": ev.delegation.id, "offset_ms": ev.offset_ms, "transcript": transcript[-12:]})
                         pending.add(ev.delegation.id)
+                        cue("wait")
                     elif t == "session.usage.updated":
                         seconds = ev.usage.seconds  # cumulative: replace, never sum
                     elif t == "error":
@@ -206,6 +226,7 @@ async def call() -> None:
             for task in tasks:
                 task.cancel()
             spk.put(None)
+            cue("stop")
             write_state("off", 0.0)
             if notch:
                 notch.terminate()  # the app collapses its tab on SIGTERM, then exits
@@ -242,6 +263,7 @@ def selftest() -> None:
     write_closed([["user", "bye"]], 42.5)
     assert json.loads(INBOX.read_text().splitlines()[-1]) == {"event": "closed", "seconds": 42.5, "transcript": [["user", "bye"]]}
     assert json.loads(next(STATE.glob("transcript-*.json")).read_text())["seconds"] == 42.5
+    assert all((SOUNDS / f"{n}.wav").exists() for n in CUES), "a cue file is missing; run sounds/make.py"
     print("ok")
 
 

@@ -23,6 +23,18 @@ let stateDir = FileManager.default.homeDirectoryForCurrentUser.appending(path: "
 let stateURL = stateDir.appending(path: "state.json")
 // ponytail: #filePath is where this file was compiled; fine for the local build this repo assumes
 let notchApp = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appending(path: "../../../notch/.build/release/CallNotch").standardized
+let sounds = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appending(path: "../../../sounds").standardized
+let volume = ProcessInfo.processInfo.environment["CALL_SOUND_VOLUME"] ?? "0.25"  // afplay -v, as in bridge.py: quiet, 0 = off
+
+/// Play sounds/<name>.wav without waiting; the same cue files and volume as the bridge. A missing file is skipped.
+func cue(_ name: String) {
+    let f = sounds.appending(path: "\(name).wav")
+    guard (Double(volume) ?? 0) > 0, FileManager.default.fileExists(atPath: f.path) else { return }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+    p.arguments = ["-v", volume, f.path]
+    try? p.run()
+}
 
 print("Loading Parakeet Ultra (first run downloads ~600 MB and compiles for the Neural Engine)…")
 let models = try await AsrModels.downloadAndLoad(version: .ultra)
@@ -95,7 +107,7 @@ if FileManager.default.isExecutableFile(atPath: notchApp.path) {
 }
 signal(SIGUSR1, SIG_IGN)
 let pause = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: q)
-pause.setEventHandler { muted.toggle(); print(muted ? "\npaused" : "\nlistening") }
+pause.setEventHandler { muted.toggle(); cue(muted ? "pause" : "start"); print(muted ? "\npaused" : "\nlistening") }
 pause.resume()
 
 // One stream so buffers reach the model in order (a Task per buffer can reorder them).
@@ -113,6 +125,7 @@ func take(_ buf: AVAudioPCMBuffer) {
     feed.yield(buf)
 }
 
+cue("start")
 if let testFile {
     let file = try AVAudioFile(forReading: testFile)
     while file.framePosition < file.length {
@@ -136,6 +149,7 @@ if let testFile {
     engine.stop()
 }
 
+cue("stop")
 ticker.cancel()
 q.sync { level = 0; writeState("off") }
 notch?.terminate()  // the app folds its tab on SIGTERM, then exits

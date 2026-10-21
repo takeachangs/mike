@@ -56,3 +56,10 @@ points and to-dos next to the transcript when it stops.
 ```bash
 cd listen && swift build -c release        # once, and after editing Sources/
 ```
+
+## Sounds
+
+Both the call and `/listen` play short, quiet cues from `sounds/` (start,
+pause, stop, waiting, answer ready). `CALL_SOUND_VOLUME` sets the level
+(`afplay -v`, default 0.25) and `0` turns them off. `sounds/make.py`
+renders them with [earshot](https://github.com/Leonxlnx/earshot)'s DSP.
