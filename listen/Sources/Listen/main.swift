@@ -87,7 +87,7 @@ var notch: Process?
 if FileManager.default.isExecutableFile(atPath: notchApp.path) {
     let p = Process()
     p.executableURL = notchApp
-    p.environment = ProcessInfo.processInfo.environment.merging(["CALL_BRIDGE_PID": "\(getpid())"]) { $1 }  // its buttons signal us
+    p.environment = ProcessInfo.processInfo.environment.merging(["CALL_BRIDGE_PID": "\(getpid())", "CALL_NOTCH_MODE": "listen"]) { $1 }  // its buttons signal us; recorder look
     p.standardOutput = FileHandle.nullDevice
     p.standardError = FileHandle.nullDevice
     try? p.run()
