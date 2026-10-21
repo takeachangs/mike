@@ -1,7 +1,7 @@
 // Listen: the /listen recorder. Transcribes the mic live with Parakeet Ultra (FluidAudio, on the Neural Engine) and keeps
 // a TwinMind-style transcript, one paragraph per clock minute ("14:05 ..."), at the path given. Audio never touches disk.
-// Drives the notch app the way bridge.py does: ~/.claude-call/state.json at 20 Hz, and CALL_BRIDGE_PID so its mute
-// button (SIGUSR1) pauses listening and its hang-up button (SIGINT, same as Ctrl-C) stops it.
+// Drives the notch app the way bridge.py does: ~/.claude-call/state.json at 20 Hz, and CALL_BRIDGE_PID so its pause
+// button (SIGUSR1) pauses listening and its stop button (SIGINT, same as Ctrl-C) stops it.
 // usage: Listen <transcript.txt> [--file audio.wav]   (--file plays a recording in real time instead of the mic, for testing)
 import Accelerate
 import AVFoundation
@@ -19,6 +19,15 @@ guard let outPath = args.first else {
     exit(2)
 }
 let out = URL(fileURLWithPath: outPath)
+setvbuf(stdout, nil, _IOLBF, 0)  // line-buffered even when piped, so "listening started" shows up at once
+do { try "".write(to: out, atomically: true, encoding: .utf8) } catch {  // a bad path fails now, not after the lecture
+    print("cannot write \(out.path): \(error.localizedDescription)")
+    exit(2)
+}
+if testFile == nil, [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .audio)) {
+    print("microphone access is off for this terminal app: System Settings > Privacy & Security > Microphone")
+    exit(1)
+}
 let stateDir = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude-call")
 let stateURL = stateDir.appending(path: "state.json")
 // ponytail: #filePath is where this file was compiled; fine for the local build this repo assumes
@@ -47,8 +56,9 @@ let clock = DateFormatter()
 clock.dateFormat = "HH:mm"
 var blocks: [(minute: String, offset: Int)] = []
 
-func fullText() async -> String {
-    [await live.confirmedTranscript, await live.volatileTranscript].filter { !$0.isEmpty }.joined(separator: " ")
+extension SlidingWindowAsrManager {
+    /// Both halves of the running text in one actor hop, so a window promoted in between is never read twice or missed.
+    var fullText: String { [confirmedTranscript, volatileTranscript].filter { !$0.isEmpty }.joined(separator: " ") }
 }
 
 func render(_ full: String) -> String {
@@ -64,12 +74,13 @@ let updates = await live.transcriptionUpdates
 let display = Task {
     var lastCount = 0
     for await update in updates where !update.text.isEmpty {
-        let full = await fullText()
+        let full = await live.fullText
         // ponytail: a window's text goes under the minute its first word was spoken, so a paragraph can run up to ~11 s past the minute
         if let t = update.tokenTimings.first?.startTime {
             let minute = clock.string(from: start.addingTimeInterval(t))
             if blocks.last?.minute != minute {
-                blocks.append((minute, min(lastCount, full.count)))
+                // the first block takes everything from the start; later ones never point before the previous one
+                blocks.append((minute, blocks.last.map { max($0.offset, min(lastCount, full.count)) } ?? 0))
                 print("\n\(minute)")
             }
         }
@@ -130,7 +141,7 @@ if let testFile {
     let file = try AVAudioFile(forReading: testFile)
     while file.framePosition < file.length {
         let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096)!
-        try file.read(into: buf)
+        guard (try? file.read(into: buf)) != nil, buf.frameLength > 0 else { break }  // compressed files overstate their length
         take(buf)
         try await Task.sleep(for: .seconds(Double(buf.frameLength) / file.processingFormat.sampleRate))  // real time, like a mic
     }
@@ -138,13 +149,22 @@ if let testFile {
     let engine = AVAudioEngine()
     engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buf, _ in take(buf) }
     try engine.start()
-    print("listening started. Ctrl-C or the notch's hang-up button stops; its mute button pauses.")
+    // A new default input (AirPods connecting) stops the engine and changes the format: tap again and restart.
+    // ponytail: audio missed during the switch shifts later minute stamps earlier by that gap (usually under a second)
+    let reconfig = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { _ in
+        engine.inputNode.removeTap(onBus: 0)
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buf, _ in take(buf) }
+        try? engine.start()
+        print("\ninput device changed, listening on the new one")
+    }
+    print("listening started. Ctrl-C or the notch's stop button stops; its pause button pauses.")
     signal(SIGINT, SIG_IGN)
     let stop = DispatchSource.makeSignalSource(signal: SIGINT, queue: q)
     await withCheckedContinuation { c in
         stop.setEventHandler { stop.cancel(); c.resume() }
         stop.resume()
     }
+    NotificationCenter.default.removeObserver(reconfig)
     engine.inputNode.removeTap(onBus: 0)
     engine.stop()
 }
@@ -159,6 +179,6 @@ await pump.value
 _ = try await live.finish()
 await live.cancel()  // ends transcriptionUpdates so the display task drains the last window and exits
 await display.value
-let full = await fullText()
+let full = await live.fullText
 try render(full).write(to: out, atomically: true, encoding: .utf8)
 print("\nsaved \(out.path) (\(full.split(separator: " ").count) words, \(Int(Date().timeIntervalSince(start) / 60)) min)")

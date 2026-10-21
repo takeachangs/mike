@@ -49,7 +49,7 @@ sign-off) closes the session.
 `listen/` is a second, separate feature: it transcribes a lecture live on
 the Mac (Parakeet Ultra on the Neural Engine, no audio saved, nothing
 uploaded) into `~/.claude-call/listen-<stamp>.txt`, one paragraph per
-clock minute, and shows it in the notch (mute pauses, hang-up stops). The
+clock minute, and shows it in the notch (its pause and stop buttons). The
 agent-side skill (`skill/listen/`) starts it and writes a summary, key
 points and to-dos next to the transcript when it stops.
 

@@ -33,7 +33,17 @@ INBOX, OUTBOX, STATE_FILE = STATE / "inbox.jsonl", STATE / "outbox.jsonl", STATE
 NOTCH_APP = Path(__file__).resolve().parent / "notch/.build/release/CallNotch"
 SOUNDS = Path(__file__).resolve().parent / "sounds"
 CUES = ("start", "pause", "stop", "wait", "ready")  # sounds/<name>.wav, rendered by sounds/make.py; Listen plays the same files
-VOLUME = os.environ.get("CALL_SOUND_VOLUME", "0.25")  # afplay -v: quiet by default, 0 turns the cues off
+
+
+def volume(raw: str) -> float:
+    """CALL_SOUND_VOLUME as afplay -v takes it; anything unreadable ("off", empty) means off, as in Listen."""
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.0
+
+
+VOLUME = volume(os.environ.get("CALL_SOUND_VOLUME", "0.25"))  # quiet by default, 0 turns the cues off
 RATE = 24000
 INSTRUCTIONS = (Path(__file__).resolve().parent / "prompt.txt").read_text()
 SIGN_OFF = "Hanging up now"  # prompt.txt makes the voice end every goodbye with this; hearing it closes the session
@@ -51,9 +61,9 @@ def append_outbox(kind: str, delegation_id: str, content: str) -> None:
 
 def cue(name: str) -> None:
     """Play sounds/<name>.wav without waiting. A missing file or player is skipped: a cue never breaks the call."""
-    if float(VOLUME) > 0 and (f := SOUNDS / f"{name}.wav").exists():
+    if VOLUME > 0 and (f := SOUNDS / f"{name}.wav").exists():
         try:
-            subprocess.Popen(["afplay", "-v", VOLUME, str(f)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["afplay", "-v", str(VOLUME), str(f)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError:
             pass
 
@@ -264,6 +274,7 @@ def selftest() -> None:
     assert json.loads(INBOX.read_text().splitlines()[-1]) == {"event": "closed", "seconds": 42.5, "transcript": [["user", "bye"]]}
     assert json.loads(next(STATE.glob("transcript-*.json")).read_text())["seconds"] == 42.5
     assert all((SOUNDS / f"{n}.wav").exists() for n in CUES), "a cue file is missing; run sounds/make.py"
+    assert volume("0.5") == 0.5 and volume("off") == volume("") == volume("-1") == 0.0
     print("ok")
 
 

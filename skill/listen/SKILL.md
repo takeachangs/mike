@@ -5,7 +5,7 @@ description: Transcribe a lecture or meeting live on this Mac (on-device, nothin
 
 # /listen — live on-device transcript, this session writes the notes
 
-The recorder lives in `~/projects/call-notch/listen`. It transcribes the microphone with Parakeet Ultra on the Neural Engine and keeps a transcript with one paragraph per clock minute (`14:05 Alright, so today…`). No audio is saved, and nothing leaves the Mac while it listens. If the notch app is built, it shows the recording like a call: clicking the orb opens a card with a timer, a mute button that pauses listening, and a hang-up button that stops it.
+The recorder lives in `~/projects/call-notch/listen`. It transcribes the microphone with Parakeet Ultra on the Neural Engine and keeps a transcript with one paragraph per clock minute (`14:05 Alright, so today…`). No audio is saved, and nothing leaves the Mac while it listens. If the notch app is built, it shows the recording like a call: clicking the orb opens a card that reads Recording or Paused, with a timer, a pause button and a stop button.
 
 ## Steps
 
@@ -25,7 +25,7 @@ The recorder lives in `~/projects/call-notch/listen`. It transcribes the microph
 
    Use the tool's "run in a terminal tab" action, not a blocking shell call. Wait for it to print `listening started`. The first time, macOS asks to let the terminal app use the microphone. Tell the person it is listening and how to stop it.
 
-3. Wait for the recorder to exit, which happens when the person presses Ctrl-C in the tab or the notch's hang-up button:
+3. Wait for the recorder to exit, which happens when the person presses Ctrl-C in the tab or the notch's stop button:
 
    ```bash
    while pgrep -x Listen >/dev/null; do sleep 5; done
