@@ -63,3 +63,14 @@ Both the call and `/listen` play short, quiet cues from `sounds/` (start,
 pause, stop, waiting, answer ready). `CALL_SOUND_VOLUME` sets the level
 (`afplay -v`, default 0.25) and `0` turns them off. `sounds/make.py`
 renders them with [earshot](https://github.com/Leonxlnx/earshot)'s DSP.
+
+## The notch app on its own
+
+Start the notch app by itself and it stays at the notch: click the notch
+for Call (a plain GPT-Live conversation, `bridge.py solo`, no agent),
+Listen (a recording) or Library (every past call and recording as a card
+you can open and search). Sessions a skill starts show up in it too.
+
+```bash
+cd notch && swift build -c release && .build/release/CallNotch
+```

@@ -5,6 +5,7 @@
 """Voice bridge: GPT-Live on the mic/speaker, Claude Code as the backend.
 
   uv run bridge.py                 start a call (Ctrl-C hangs up)
+  uv run bridge.py solo            a plain GPT-Live call: no delegation, no agent (the menu bar app's call)
   uv run bridge.py say  ID "text"  spoken result for delegation ID
   uv run bridge.py note ID "text"  quiet progress for delegation ID
   uv run bridge.py selftest
@@ -46,6 +47,11 @@ def volume(raw: str) -> float:
 VOLUME = volume(os.environ.get("CALL_SOUND_VOLUME", "0.25"))  # quiet by default, 0 turns the cues off
 RATE = 24000
 INSTRUCTIONS = (Path(__file__).resolve().parent / "prompt.txt").read_text()
+SOLO_INSTRUCTIONS = (  # the solo call's whole prompt: no agent behind it, so it must not promise to look things up
+    "You are a friendly, concise voice assistant on the user's Mac. Answer from your own knowledge in short spoken "
+    "sentences. You have no tools, no internet and no access to the user's files, so say so plainly when asked for "
+    "something current or personal. When the user says goodbye, say goodbye and end with exactly: Hanging up now."
+)
 SIGN_OFF = "Hanging up now"  # prompt.txt makes the voice end every goodbye with this; hearing it closes the session
 SPEECH_LEVEL = 0.15  # ponytail: mic rms (see rms()) that counts as speech for the idle guard; tune in a real room so typing stays below it
 IDLE_AFTER = 90  # seconds with no speech, no audio out and no pending delegation before the bridge hangs up
@@ -66,6 +72,15 @@ def cue(name: str) -> None:
             subprocess.Popen(["afplay", "-v", str(VOLUME), str(f)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError:
             pass
+
+
+def app_running() -> bool:
+    """True when the resident notch app (CallNotch started on its own) is up; it then shows this call itself."""
+    try:
+        os.kill(int((STATE / "app.pid").read_text()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def write_inbox(obj: dict) -> None:
@@ -97,12 +112,12 @@ def rms(chunk: bytes) -> float:
 
 
 def write_state(state: str, level: float, muted: bool = False) -> None:
-    tmp = STATE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"state": state, "level": round(level, 3), "muted": muted}))
+    tmp = STATE_FILE.with_suffix(".tmp")  # pid and mode let a resident notch app (one we did not launch) signal and label us
+    tmp.write_text(json.dumps({"state": state, "level": round(level, 3), "muted": muted, "pid": os.getpid(), "mode": "call"}))
     os.replace(tmp, STATE_FILE)  # atomic: the notch app never reads half a file
 
 
-async def call() -> None:
+async def call(solo: bool = False) -> None:
     import sounddevice as sd
     from openai import AsyncOpenAI
 
@@ -191,9 +206,7 @@ async def call() -> None:
     async with client.live.connect() as conn:
         await conn.session.start(session={
             "model": "gpt-live-1",
-            "delegation": {"type": "client"},
-            "instructions": INSTRUCTIONS,
-            **seed(),
+            **({"instructions": SOLO_INSTRUCTIONS} if solo else {"delegation": {"type": "client"}, "instructions": INSTRUCTIONS, **seed()}),
             "audio": {"format": {"type": "audio/pcm", "rate": RATE}},
         })
         tasks = []
@@ -205,7 +218,7 @@ async def call() -> None:
                         print("call started, talk. Ctrl-C hangs up.")
                         cue("start")
                         write_state("listening", 0.0)
-                        if NOTCH_APP.exists():
+                        if NOTCH_APP.exists() and not app_running():
                             notch = subprocess.Popen([NOTCH_APP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                                      env={**os.environ, "CALL_BRIDGE_PID": str(os.getpid())})  # its buttons signal us
                         loop.add_signal_handler(signal.SIGUSR1, lambda: asyncio.create_task(toggle_mute(conn)))
@@ -264,7 +277,12 @@ def selftest() -> None:
     assert json.loads(INBOX.read_text())["id"] == "item_1"
     assert rms(b"") == 0 and rms(array("h", [3000, -3000]).tobytes()) == 0.5 and rms(array("h", [32767]).tobytes()) == 1
     write_state("thinking", 0.0)
-    assert json.loads(STATE_FILE.read_text()) == {"state": "thinking", "level": 0.0, "muted": False}
+    assert json.loads(STATE_FILE.read_text()) == {"state": "thinking", "level": 0.0, "muted": False, "pid": os.getpid(), "mode": "call"}
+    assert not app_running()
+    (STATE / "app.pid").write_text(str(os.getpid()))
+    assert app_running()
+    (STATE / "app.pid").write_text("x")
+    assert not app_running()
     assert seed() == {}
     (STATE / "context.txt").write_text("y" * 5000)
     assert seed()["input"] == [{"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "y" * CONTEXT_CAP}]}]
@@ -274,6 +292,7 @@ def selftest() -> None:
     assert json.loads(INBOX.read_text().splitlines()[-1]) == {"event": "closed", "seconds": 42.5, "transcript": [["user", "bye"]]}
     assert json.loads(next(STATE.glob("transcript-*.json")).read_text())["seconds"] == 42.5
     assert all((SOUNDS / f"{n}.wav").exists() for n in CUES), "a cue file is missing; run sounds/make.py"
+    assert SIGN_OFF in SOLO_INSTRUCTIONS  # the solo voice can hang up too
     assert volume("0.5") == 0.5 and volume("off") == volume("") == volume("-1") == 0.0
     print("ok")
 
@@ -283,6 +302,11 @@ if __name__ == "__main__":
     if not a:
         try:
             asyncio.run(call())
+        except KeyboardInterrupt:
+            pass
+    elif a == ["solo"]:
+        try:
+            asyncio.run(call(solo=True))
         except KeyboardInterrupt:
             pass
     elif a[0] in ("say", "note") and len(a) == 3:
