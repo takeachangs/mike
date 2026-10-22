@@ -1,7 +1,7 @@
 # Renders the cue sounds in this folder: soft detuned sines in D major with a 25 ms fade-in, a 0.10 s decay and a
 # small room, every cue about 0.7 s. Built on earshot's DSP (https://github.com/Leonxlnx/earshot, MIT); it is not a
 # dependency of the bridge or the recorder, only of this script. Run it with an earshot install's Python:
-#   <earshot>/.venv/bin/python sounds/make.py
+#   <earshot>/.venv/bin/python app/scripts/make-sounds.py
 from pathlib import Path
 
 import numpy as np
@@ -39,5 +39,5 @@ for name, (notes, gap) in CUES.items():
         dsp.place(y, tone(N[n], dur), i * gap, gain=0.85 ** i)  # later notes slightly softer
     y = fx.reverb(dsp.butter(y, "low", 5000), dsp.rng(7), rt60=0.4, size=0.7, damp=0.6, wet=0.15, width=1.0)
     y = dsp.normalize(dsp.fade(dsp.trim_tail(y, floor_db=-60), fin=0.002, fout=0.05), -1.0)
-    sf.write(Path(__file__).parent / f"{name}.wav", y, SR, subtype="PCM_16")
+    sf.write(Path(__file__).resolve().parent.parent / "Sources/CallNotchKit/Resources/sounds" / f"{name}.wav", y, SR, subtype="PCM_16")
     print(f"{name:6s} {len(y) / SR:4.2f} s  {check(y, SR)['summary']}")

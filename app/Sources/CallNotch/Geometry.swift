@@ -1,0 +1,79 @@
+import AppKit
+import SwiftUI
+
+let amber = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
+let tabWidth = 42.0, ear = 10.0, overlap = 12.0  // overlap: black drawn under the notch so its rounded corner fills in
+let cardHeight = 116.0
+
+/// Where the notch is on the main screen, and the panel frames built around it. Panel coordinates have y down.
+struct NotchGeometry {
+    let notchLeft: Double, notchRight: Double, height: Double, screenTop: Double
+
+    init(screen: NSScreen) {
+        if let l = screen.auxiliaryTopLeftArea, let r = screen.auxiliaryTopRightArea, screen.safeAreaInsets.top > 0 {
+            (notchLeft, notchRight, height) = (l.maxX, r.minX, screen.safeAreaInsets.top)
+        } else {
+            // No cutout: a centred 180-pt notch, as tall as the menu bar.
+            // ponytail: 24 pt is the menu bar since Big Sur (NSStatusBar.system.thickness still says 22); measure it if that changes.
+            (notchLeft, notchRight, height) = (screen.frame.midX - 90, screen.frame.midX + 90, 24)
+        }
+        screenTop = screen.frame.maxY
+    }
+
+    var notchWidth: Double { notchRight - notchLeft }
+    var cardRight: Double { ear + 2 * tabWidth + notchWidth }  // the card: tab's left edge to a tab past the notch
+    var tabRect: CGRect { CGRect(x: 0, y: 0, width: ear + tabWidth, height: height) }
+    var notchRect: CGRect { CGRect(x: ear + tabWidth, y: 0, width: notchWidth, height: height) }
+    var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - ear, y: screenTop - height, width: 2 * ear + tabWidth + notchWidth, height: height) }
+    var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight, width: cardRight + ear, height: height + cardHeight) }
+}
+
+/// Recomputed when displays change (main.swift); read on the main thread only.
+nonisolated(unsafe) var geo = NotchGeometry(screen: NSScreen.main ?? NSScreen.screens[0])
+
+/// Black hanging from the screen top down to b between panel x l and r, bottom corners k (shrunk when short, as CSS does).
+func hang(_ l: Double, _ r: Double, _ b: Double, _ k: Double) -> Path {
+    let k = min(k, b / 2, (r - l) / 2)
+    var p = Path()
+    p.move(to: CGPoint(x: l, y: 0))
+    p.addLine(to: CGPoint(x: l, y: b - k))
+    p.addArc(tangent1End: CGPoint(x: l, y: b), tangent2End: CGPoint(x: l + k, y: b), radius: k)
+    p.addArc(tangent1End: CGPoint(x: r, y: b), tangent2End: CGPoint(x: r, y: b - k), radius: k)
+    p.addLine(to: CGPoint(x: r, y: 0))
+    p.closeSubpath()
+    return p
+}
+
+/// Concave ears of size e flaring into the menu bar outside l and r: the tab's curve. Same winding as `hang`.
+func ears(_ l: Double, _ r: Double, _ e: Double) -> Path {
+    var p = Path()
+    p.move(to: CGPoint(x: l - e, y: 0))
+    p.addCurve(to: CGPoint(x: l, y: e), control1: CGPoint(x: l - e + 0.552 * e, y: 0), control2: CGPoint(x: l, y: e - 0.552 * e))
+    p.addLine(to: CGPoint(x: l, y: 0))
+    p.closeSubpath()
+    p.move(to: CGPoint(x: r, y: 0))
+    p.addLine(to: CGPoint(x: r, y: e))
+    p.addCurve(to: CGPoint(x: r + e, y: 0), control1: CGPoint(x: r, y: e - 0.552 * e), control2: CGPoint(x: r + e - 0.552 * e, y: 0))
+    p.closeSubpath()
+    return p
+}
+
+/// Critically damped spring, solved in closed form so any frame time is stable. Retargeting keeps value and velocity.
+/// Settles (99 %) in about its response, so a 0.08 response stands in for an 80 ms ease-out.
+struct Spring {
+    var value: Double, velocity = 0.0, target: Double, response: Double
+    init(_ v: Double, response: Double) { value = v; target = v; self.response = response }
+    mutating func step(_ dt: Double) {
+        let w = 2 * .pi / response, c1 = value - target, c2 = velocity + w * c1, e = exp(-w * dt)
+        value = target + (c1 + c2 * dt) * e
+        velocity = (c2 - w * (c1 + c2 * dt)) * e
+    }
+}
+
+/// CSS cubic-bezier(x1, y1, x2, y2), default `ease`, solved by bisection.
+func cssEase(_ x: Double, _ x1: Double = 0.25, _ y1: Double = 0.1, _ x2: Double = 0.25, _ y2: Double = 1) -> Double {
+    func bez(_ s: Double, _ p1: Double, _ p2: Double) -> Double { 3 * (1 - s) * (1 - s) * s * p1 + 3 * (1 - s) * s * s * p2 + s * s * s }
+    var lo = 0.0, hi = 1.0
+    for _ in 0..<16 { let m = (lo + hi) / 2; if bez(m, x1, x2) < x { lo = m } else { hi = m } }
+    return bez((lo + hi) / 2, y1, y2)
+}

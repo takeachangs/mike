@@ -5,7 +5,7 @@
 """Voice bridge: GPT-Live on the mic/speaker, Claude Code as the backend.
 
   uv run bridge.py                 start a call (Ctrl-C hangs up)
-  uv run bridge.py solo            a plain GPT-Live call: no delegation, no agent (the menu bar app's call)
+  uv run bridge.py solo            a plain GPT-Live call: no delegation, no agent (the app's Call does the same in Swift)
   uv run bridge.py say  ID "text"  spoken result for delegation ID
   uv run bridge.py note ID "text"  quiet progress for delegation ID
   uv run bridge.py selftest
@@ -16,12 +16,12 @@ A final {"event": "closed", "seconds": ..., "transcript": [...]} line ends the
 call; `seconds` is the API's final billed audio duration (null if the close was
 never confirmed). Replies go through the outbox (written by `say` / `note`) and
 are forwarded to the Live session. During a call ~/.claude-call/state.json
-carries {"state", "level", "muted"} at 20 Hz for the notch app (notch/), which
+carries {"state", "level", "muted", "pid", "mode"} at 20 Hz for the notch (CallNotch.app), which
 is launched here if it has been built; its buttons signal this process
 (SIGUSR1 toggles mute, SIGINT hangs up). ~/.claude-call/context.txt, if present,
 seeds the session as a developer message. The call closes itself after
 IDLE_AFTER seconds with no speech, no audio out and no delegation pending.
-Short cues from sounds/ play quietly at call start, mute and unmute, each
+Short cues (the app's cue files, SOUNDS) play quietly at call start, mute and unmute, each
 delegation, its first answer and hang-up; CALL_SOUND_VOLUME (afplay -v,
 default 0.25) sets the level and 0 turns them off.
 """
@@ -31,9 +31,14 @@ from pathlib import Path
 
 STATE = Path.home() / ".claude-call"
 INBOX, OUTBOX, STATE_FILE = STATE / "inbox.jsonl", STATE / "outbox.jsonl", STATE / "state.json"
-NOTCH_APP = Path(__file__).resolve().parent / "notch/.build/release/CallNotch"
-SOUNDS = Path(__file__).resolve().parent / "sounds"
-CUES = ("start", "pause", "stop", "wait", "ready")  # sounds/<name>.wav, rendered by sounds/make.py; Listen plays the same files
+REPO = Path(__file__).resolve().parent
+# The notch: an installed CallNotch.app first, then this checkout's build (scripts/build-app.sh, or a plain swift build).
+NOTCH_APP = next((p for p in (Path("/Applications/CallNotch.app/Contents/MacOS/CallNotch"),
+                              Path.home() / "Applications/CallNotch.app/Contents/MacOS/CallNotch",
+                              REPO / "app/dist/CallNotch.app/Contents/MacOS/CallNotch",
+                              REPO / "app/.build/release/CallNotch") if p.exists()), REPO / "app/.build/release/CallNotch")
+SOUNDS = REPO / "app/Sources/CallNotchKit/Resources/sounds"
+CUES = ("start", "pause", "stop", "wait", "ready")  # <name>.wav in SOUNDS, rendered by app/scripts/make-sounds.py; the app plays the same files
 
 
 def volume(raw: str) -> float:
@@ -66,7 +71,7 @@ def append_outbox(kind: str, delegation_id: str, content: str) -> None:
 
 
 def cue(name: str) -> None:
-    """Play sounds/<name>.wav without waiting. A missing file or player is skipped: a cue never breaks the call."""
+    """Play SOUNDS/<name>.wav without waiting. A missing file or player is skipped: a cue never breaks the call."""
     if VOLUME > 0 and (f := SOUNDS / f"{name}.wav").exists():
         try:
             subprocess.Popen(["afplay", "-v", str(VOLUME), str(f)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -291,7 +296,7 @@ def selftest() -> None:
     write_closed([["user", "bye"]], 42.5)
     assert json.loads(INBOX.read_text().splitlines()[-1]) == {"event": "closed", "seconds": 42.5, "transcript": [["user", "bye"]]}
     assert json.loads(next(STATE.glob("transcript-*.json")).read_text())["seconds"] == 42.5
-    assert all((SOUNDS / f"{n}.wav").exists() for n in CUES), "a cue file is missing; run sounds/make.py"
+    assert all((SOUNDS / f"{n}.wav").exists() for n in CUES), "a cue file is missing; run app/scripts/make-sounds.py"
     assert SIGN_OFF in SOLO_INSTRUCTIONS  # the solo voice can hang up too
     assert volume("0.5") == 0.5 and volume("off") == volume("") == volume("-1") == 0.0
     print("ok")

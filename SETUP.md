@@ -18,8 +18,8 @@ anything.
 
 | Needs | How to check | If missing |
 | --- | --- | --- |
-| macOS 14 or newer, Apple Silicon or Intel | `sw_vers -productVersion` | the notch app is macOS-only; the bridge alone also runs on Linux (no notch) |
-| Xcode command line tools (Swift 5.9+) | `xcrun swift --version` | `xcode-select --install` (needs the person's password; ask them to run it) |
+| macOS 14 or newer on Apple Silicon | `sw_vers -productVersion`, `uname -m` prints `arm64` | the app needs Apple Silicon (the speech model runs on the Neural Engine); the bridge alone also runs elsewhere, with no notch |
+| Xcode 16 or its command line tools (Swift 6) | `xcrun swift --version` | `xcode-select --install` (needs the person's password; ask them to run it) |
 | `uv` | `uv --version` | https://docs.astral.sh/uv/ , `brew install uv` |
 | an OpenAI API key with GPT-Live access | `echo ${OPENAI_API_KEY:+set}` prints `set` | the person creates one at platform.openai.com and puts `export OPENAI_API_KEY=...` in their shell profile. Never write the key into any file in this repo or the notes folder. |
 | a notes folder with an agent rules file (`CLAUDE.md`, `AGENTS.md`, …) | ask the person for the path | the call answers from this folder; without it there is nothing to answer from |
@@ -37,17 +37,19 @@ Any location works as long as it is **not** inside a folder that syncs to
 iCloud Drive (on macOS, `~/Documents` and `~/Desktop` usually do). The
 Swift build directory churns and would upload on every compile.
 
-## 2. Build the notch app
+## 2. Build and install the app
 
 ```bash
-cd ~/projects/call-notch/notch && swift build -c release
+cd ~/projects/call-notch/app && scripts/build-app.sh && scripts/install.sh
 ```
 
-Expect `Build complete!` and a binary at `notch/.build/release/CallNotch`.
-Then prove it draws, without any API call:
+The first build fetches FluidAudio and takes a few minutes. Expect
+`built dist/CallNotch.app`. The bridge and the skills use the installed
+copy in `/Applications` (the notch, and the `Listen` command inside it).
+Then prove the notch draws, without any API call:
 
 ```bash
-cd ~/projects/call-notch/notch && python3 drive.py & .build/release/CallNotch
+cd ~/projects/call-notch/app && swift build -c release && python3 scripts/drive.py
 ```
 
 For about eleven seconds a black tab grows to the left of the notch: one
@@ -126,19 +128,15 @@ in `skill/SKILL.md` under "Without a watcher".
 
 ## 5b. Optional: /listen
 
-Live lecture transcription on the Mac, shown in the same notch. Build the
-recorder (the first build fetches FluidAudio and takes a few minutes):
-
-```bash
-cd ~/projects/call-notch/listen && swift build -c release
-```
+Live lecture transcription on the Mac, shown in the same notch. The
+recorder is the `Listen` command inside the app installed in step 2.
 
 Copy `skill/listen/SKILL.md` to `<notes>/.claude/skills/listen/SKILL.md`
 (or the tool's equivalent, as in step 5). To check it without the
 microphone, play any speech recording through it in real time:
 
 ```bash
-~/projects/call-notch/listen/.build/release/Listen /tmp/listen-test.txt --file speech.wav
+/Applications/CallNotch.app/Contents/MacOS/Listen /tmp/listen-test.txt --file speech.wav
 ```
 
 The first run downloads the model (about 600 MB). Expect the notch tab
@@ -177,9 +175,10 @@ one without being asked.
   `NSScreen.main`. With an external display as main, it falls back to a
   centred tab. Make the built-in display the main one, or accept the
   fallback.
-- **The app never quits**: it quits on `off` in `~/.claude-call/state.json`
-  or when that file is older than three seconds. If the bridge died hard,
-  `pkill CallNotch`.
+- **The notch never folds away**: a session's notch quits on `off` in
+  `~/.claude-call/state.json` or when that file is older than three
+  seconds; the resident app (started on its own) stays by design and quits
+  from its card. If something died hard, `pkill CallNotch`.
 - **The voice answers notes questions itself instead of delegating**: the
   Delegation section in `prompt.txt` is the knob. Add the kind of question
   it answered to the list.
