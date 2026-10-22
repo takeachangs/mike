@@ -75,4 +75,16 @@ import Testing
         #expect(LiveCall.silence(quiet: 9_999, limit: 0, warned: false) == (false, false))  // Never
         #expect(LiveCall.silence(quiet: 6, limit: 15, warned: false) == (true, false))    // short limits warn early
     }
+
+    @Test func playbackIsTrackedByTheClockAndSilenceIsNotSpeech() {
+        var m = LiveCall.Meter()
+        m.slices = [(end: 10.0, level: 0.6), (end: 10.1, level: 0.0), (end: 10.2, level: 0.0)]  // voice, then padding
+        m.advance(9.95)
+        #expect(m.voiceAhead && m.speaking(9.95))
+        m.advance(10.05)                       // the voiced slice has played; only silence is left
+        #expect(!m.voiceAhead && m.spkAt == 10.0)
+        #expect(m.speaking(10.2))              // within 0.3 s of the last voice
+        m.advance(11)
+        #expect(m.slices.isEmpty && !m.speaking(11))  // never stuck "speaking" on silent or unacknowledged audio
+    }
 }

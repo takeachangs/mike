@@ -28,8 +28,22 @@ public final class LiveCall: @unchecked Sendable {
     public var muted: Bool { meter.withLock { $0.muted } }
 
     struct Meter {
-        var mic = 0.0, spk = 0.0, spkAt = 0.0, activeAt = 0.0
-        var queued: [Double] = []  // levels of the 100 ms output slices scheduled and not yet played
+        var mic = 0.0, spkAt = 0.0, activeAt = 0.0
+        /// Output slices scheduled and not yet finished, by the time each one ends. Playback is tracked by the clock,
+        /// not by AVAudioPlayerNode's completion callbacks, which can stop arriving and left a call "speaking" forever.
+        var slices: [(end: TimeInterval, level: Double)] = []
+        var playEnd = 0.0
+
+        /// Drops finished slices; a finished slice with voice in it moves `spkAt`. Silent slices never count as speech.
+        mutating func advance(_ now: TimeInterval) {
+            while let first = slices.first, first.end <= now {
+                if first.level > Meter.voiced { spkAt = max(spkAt, first.end) }
+                slices.removeFirst()
+            }
+        }
+        var voiceAhead: Bool { slices.contains { $0.level > Meter.voiced } }
+        func speaking(_ now: TimeInterval) -> Bool { voiceAhead || now - spkAt < 0.3 }
+        static let voiced = 0.02  // rms on bridge.py's scale (speech ~0.5): anything quieter is silence or padding
         var muted = false, sending = false
     }
 
@@ -62,9 +76,10 @@ public final class LiveCall: @unchecked Sendable {
             return URLSession.shared.webSocketTask(with: req)
         }
         ticker = StateTicker { [meter] in
-            let m = meter.withLock { $0 }
-            let speaking = !m.queued.isEmpty || LiveCall.now - m.spkAt < 0.3
-            return SessionState(state: speaking ? "speaking" : "listening", level: speaking ? m.queued.first ?? m.spk : m.mic,
+            let now = LiveCall.now
+            let m = meter.withLock { m in m.advance(now); return m }
+            let speaking = m.speaking(now)
+            return SessionState(state: speaking ? "speaking" : "listening", level: speaking ? m.slices.first?.level ?? 0 : m.mic,
                                 muted: m.muted, pid: getpid(), mode: .call)
         }
     }
@@ -198,6 +213,7 @@ public final class LiveCall: @unchecked Sendable {
             guard phase == .live else { return }
             let now = LiveCall.now
             let m = meter.withLock { m in
+                m.advance(now)
                 if m.muted { m.activeAt = now }  // muting is a deliberate pause: it never counts as silence
                 return m
             }
@@ -205,11 +221,11 @@ public final class LiveCall: @unchecked Sendable {
                 lastPing = now
                 task?.sendPing { [self] error in if let error { q.async { self.socketFailed(error) } } }
             }
-            let quiet = now - max(m.activeAt, m.spkAt, m.queued.isEmpty ? 0 : now)
+            let quiet = now - max(m.activeAt, m.spkAt, m.voiceAhead ? now : 0)
             let s = LiveCall.silence(quiet: quiet, limit: hangUpAfterSilence, warned: warned)
             if quiet < max(0, hangUpAfterSilence - LiveCall.silenceWarning) { warned = false }  // talking again re-arms it
             if s.warn { warned = true; Cue.wait.play() }
-            if signedOff, m.queued.isEmpty, now - m.spkAt > 0.8 { close("sign-off played") }
+            if signedOff, !m.voiceAhead, now - m.spkAt > 0.8 { close("sign-off played") }  // the goodbye has played out
             else if s.hangUp { close("silent for \(Int(hangUpAfterSilence)) s") }
             else { watch() }
         }
@@ -331,7 +347,7 @@ public final class LiveCall: @unchecked Sendable {
         }
     }
 
-    /// Schedules output audio in 100 ms slices; each slice's completion, at playback, moves the speaking clock.
+    /// Schedules output audio in 100 ms slices, noting when each will have played (see Meter.slices).
     // ponytail: audio already queued keeps playing after the user interrupts, as in bridge.py; stop the player on input_transcript if it bothers
     private func play(_ pcm: Data) {
         let format = player.outputFormat(forBus: 0), samples = pcm.count / 2
@@ -343,13 +359,12 @@ public final class LiveCall: @unchecked Sendable {
                 for i in 0..<n { ch[0][i] = Float(raw.loadUnaligned(fromByteOffset: (start + i) * 2, as: Int16.self)) / 32768 }
             }
             let level = LiveProtocol.rms(pcm.subdata(in: start * 2 ..< (start + n) * 2))
-            meter.withLock { $0.queued.append(level) }
-            player.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [meter] _ in
-                meter.withLock { m in
-                    if !m.queued.isEmpty { m.spk = m.queued.removeFirst() }
-                    m.spkAt = LiveCall.now
-                }
+            let now = LiveCall.now
+            meter.withLock { m in  // slices play back to back: this one ends a slice-length after the last, or after now
+                m.playEnd = max(m.playEnd, now) + Double(n) / Double(LiveProtocol.rate)
+                m.slices.append((m.playEnd, level))
             }
+            player.scheduleBuffer(buf)
         }
     }
 
@@ -360,8 +375,8 @@ public final class LiveCall: @unchecked Sendable {
                 mic.stop()
                 try startMic()
             } else {
-                player.stop()  // drops what was scheduled; its completions may not come, so forget their levels
-                meter.withLock { $0.queued.removeAll() }
+                player.stop()  // drops what was scheduled, so forget those slices
+                meter.withLock { $0.slices.removeAll(); $0.playEnd = 0 }
                 try out.start()
                 player.play()
             }
