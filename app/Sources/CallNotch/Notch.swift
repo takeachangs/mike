@@ -42,7 +42,7 @@ import SwiftUI
 
     /// The panel grows to hold the card before it opens and shrinks back once it has closed, so a closed card
     /// leaves nothing on screen to swallow clicks.
-    // ponytail: while open (and ~0.4 s into closing) the panel's transparent corners, e.g. right of the right ear, eat clicks.
+    // ponytail: while open (and ~0.4 s into closing) the panel's transparent corners, e.g. right of the card, eat clicks.
     func setOpen(_ o: Bool) {
         open = o; hovered = false; outSince = nil
         if o { panel?.setFrame(geo.expanded, display: true); wake(true) }
@@ -58,16 +58,14 @@ import SwiftUI
     }
 
     /// The card at this frame, in panel coordinates: a `hang` whose edges, depth and corners interpolate from the
-    /// closed shape to the card, with the menu-bar ears riding its top corners. Also the clip for the card's content.
+    /// closed shape to the card. Top corners stay square, meeting the bezel as the notch does. Also the content's clip.
     func cardShape() -> Path {
-        let h = geo.height, notchX = ear + tabWidth, pk = peek.value * press.value
+        let h = geo.height, notchX = margin + tabWidth, pk = peek.value * press.value
         let x = reduce ? 1 : min(max(cx.value, 0), 1), y = reduce ? 1 : min(max(cy.value, 0), 1)
         // Closed: the hover swell over the notch when idle, the tab plus the notch during a session.
         let l0 = notchX - max(max(width.value, 0), 2 * pk), r0 = notchX + geo.notchWidth + 2 * pk, b0 = h + 4 * pk
-        let l = l0 + (ear - l0) * x, r = r0 + (geo.cardRight - r0) * x, b = b0 + (h + cardHeight - b0) * y
-        var path = hang(l, r, b, 12 + 8 * y)
-        path.addPath(ears(l, r, min(ear, max(ear * pk, r - r0))))  // ears grow as the edges leave the notch
-        return path
+        let l = l0 + (margin - l0) * x, r = r0 + (geo.cardRight - r0) * x, b = b0 + (h + cardHeight - b0) * y
+        return hang(l, r, b, 12 + 8 * y)
     }
 
     /// Like boring.notch: once the pointer has been over the drawn shape or the card, leaving it for 100 ms closes the card.
@@ -83,7 +81,7 @@ import SwiftUI
             return
         }
         if CGRect(x: 0, y: 0, width: geo.collapsed.width, height: geo.height).contains(pt)
-            || hang(ear, geo.cardRight, geo.height + cardHeight, 20).contains(pt) { hovered = true; outSince = nil; return }
+            || hang(margin, geo.cardRight, geo.height + cardHeight, 20).contains(pt) { hovered = true; outSince = nil; return }
         guard hovered else { return }
         outSince = outSince ?? now
         if now.timeIntervalSince(outSince!) >= 0.1 { setOpen(false) }
@@ -154,31 +152,26 @@ import SwiftUI
     }
 
     func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
-        let h = geo.height, notchX = ear + tabWidth, w = max(width.value, 0), pk = peek.value * press.value
+        let h = geo.height, notchX = margin + tabWidth, w = max(width.value, 0), pk = peek.value * press.value
         // Card: the notch itself growing into it (cardShape), never scaled, so its corners stay round. Reduce Motion:
         // the full card cross-fades. Closing, the tail of the springs settles inside the hardware cutout, out of sight.
         if shown > 0.002 { ctx.fill(cardShape(), with: .color(.black.opacity(reduce ? fade.value : 1))) }
         if w <= 0.1 && peek.value > 0.01 {  // idle hover: 2 pt wider each side and 4 pt deeper than the cutout
-            var idle = hang(notchX - 2 * pk, notchX + geo.notchWidth + 2 * pk, h + 4 * pk, 12)
-            idle.addPath(ears(notchX - 2 * pk, notchX + geo.notchWidth + 2 * pk, ear))
-            ctx.fill(idle, with: .color(.black))
+            ctx.fill(hang(notchX - 2 * pk, notchX + geo.notchWidth + 2 * pk, h + 4 * pk, 12), with: .color(.black))
         }
         var tab = Path()
         if w > 0.1 {
-            let e = min(ear, w), left = notchX - w, r = min(12, w, h / 2)
-            tab.move(to: CGPoint(x: left - e, y: 0))
-            tab.addCurve(to: CGPoint(x: left, y: e), control1: CGPoint(x: left - e + 0.552 * e, y: 0), control2: CGPoint(x: left, y: e - 0.552 * e))
+            let left = notchX - w, r = min(12, w, h / 2)
+            tab.move(to: CGPoint(x: left, y: 0))
             tab.addLine(to: CGPoint(x: left, y: h - r))
             tab.addArc(tangent1End: CGPoint(x: left, y: h), tangent2End: CGPoint(x: left + r, y: h), radius: r)
             tab.addLine(to: CGPoint(x: notchX + min(overlap, w), y: h))
             tab.addLine(to: CGPoint(x: notchX + min(overlap, w), y: 0))
             tab.closeSubpath()
-            // The notch body and its ears grow from the top with the tab: under a hardware cutout nobody sees the
-            // body, on a screen without one it is the notch.
-            let n = min(w / tabWidth, 1)
+            // The notch body grows from the top with the tab: under a hardware cutout nobody sees it, on a screen
+            // without one it is the notch.
             var shape = tab
-            shape.addPath(hang(notchX, notchX + geo.notchWidth, h * n, 12))
-            shape.addPath(ears(notchX, notchX + geo.notchWidth, ear * n))
+            shape.addPath(hang(notchX, notchX + geo.notchWidth, h * min(w / tabWidth, 1), 12))
             ctx.fill(shape, with: .color(.black))
         }
         guard w > 0.1 else { return }

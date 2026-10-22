@@ -38,9 +38,9 @@ struct NotchView: View {
             }, after: 0.12)
         }
         .foregroundStyle(.white)
-        .frame(width: geo.cardRight - ear, height: cardHeight)
+        .frame(width: geo.cardRight - margin, height: cardHeight)
         .allowsHitTesting(m.open && (m.reduce || m.cy.value > 0.8))  // not before it can be seen
-        .offset(x: ear, y: geo.height)
+        .offset(x: margin, y: geo.height)
     }
 
     func label(_ text: String, alert: Bool = false) -> some View {
@@ -72,9 +72,9 @@ struct NotchView: View {
             }.padding(.top, 4), after: 0.12)
         }
         .foregroundStyle(.white)
-        .frame(width: geo.cardRight - ear, height: cardHeight)
+        .frame(width: geo.cardRight - margin, height: cardHeight)
         .allowsHitTesting(m.open && (m.reduce || m.cy.value > 0.8))  // not before it can be seen
-        .offset(x: ear, y: geo.height)
+        .offset(x: margin, y: geo.height)
     }
 
     /// In: fade 180 ms and settle 6 pt down with a strong ease-out, after `delay`; the growing edge wipes it in (the clip).

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 let amber = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
-let tabWidth = 42.0, ear = 10.0, overlap = 12.0  // overlap: black drawn under the notch so its rounded corner fills in
+let tabWidth = 42.0, margin = 10.0, overlap = 12.0  // margin: panel room left of the tab; overlap: black under the notch so its corner fills in
 let cardHeight = 116.0
 let pad = 4.0  // room below and right of the notch for the hover swell, else the window clips it
 
@@ -22,11 +22,11 @@ struct NotchGeometry {
     }
 
     var notchWidth: Double { notchRight - notchLeft }
-    var cardRight: Double { ear + 2 * tabWidth + notchWidth }  // the card: tab's left edge to a tab past the notch
-    var tabRect: CGRect { CGRect(x: 0, y: 0, width: ear + tabWidth, height: height) }
-    var notchRect: CGRect { CGRect(x: ear + tabWidth, y: 0, width: notchWidth, height: height) }
-    var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - ear, y: screenTop - height - pad, width: 2 * ear + tabWidth + notchWidth + pad, height: height + pad) }
-    var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight - pad, width: cardRight + ear + pad, height: height + cardHeight + pad) }
+    var cardRight: Double { margin + 2 * tabWidth + notchWidth }  // the card: tab's left edge to a tab past the notch
+    var tabRect: CGRect { CGRect(x: 0, y: 0, width: margin + tabWidth, height: height) }
+    var notchRect: CGRect { CGRect(x: margin + tabWidth, y: 0, width: notchWidth, height: height) }
+    var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - margin, y: screenTop - height - pad, width: 2 * margin + tabWidth + notchWidth + pad, height: height + pad) }
+    var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight - pad, width: cardRight + margin + pad, height: height + cardHeight + pad) }
 }
 
 /// Recomputed when displays change (main.swift); read on the main thread only.
@@ -41,20 +41,6 @@ func hang(_ l: Double, _ r: Double, _ b: Double, _ k: Double) -> Path {
     p.addArc(tangent1End: CGPoint(x: l, y: b), tangent2End: CGPoint(x: l + k, y: b), radius: k)
     p.addArc(tangent1End: CGPoint(x: r, y: b), tangent2End: CGPoint(x: r, y: b - k), radius: k)
     p.addLine(to: CGPoint(x: r, y: 0))
-    p.closeSubpath()
-    return p
-}
-
-/// Concave ears of size e flaring into the menu bar outside l and r: the tab's curve. Same winding as `hang`.
-func ears(_ l: Double, _ r: Double, _ e: Double) -> Path {
-    var p = Path()
-    p.move(to: CGPoint(x: l - e, y: 0))
-    p.addCurve(to: CGPoint(x: l, y: e), control1: CGPoint(x: l - e + 0.552 * e, y: 0), control2: CGPoint(x: l, y: e - 0.552 * e))
-    p.addLine(to: CGPoint(x: l, y: 0))
-    p.closeSubpath()
-    p.move(to: CGPoint(x: r, y: 0))
-    p.addLine(to: CGPoint(x: r, y: e))
-    p.addCurve(to: CGPoint(x: r + e, y: 0), control1: CGPoint(x: r, y: e - 0.552 * e), control2: CGPoint(x: r + e - 0.552 * e, y: 0))
     p.closeSubpath()
     return p
 }
