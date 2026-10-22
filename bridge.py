@@ -31,9 +31,14 @@ from pathlib import Path
 
 STATE = Path.home() / ".claude-call"
 INBOX, OUTBOX, STATE_FILE = STATE / "inbox.jsonl", STATE / "outbox.jsonl", STATE / "state.json"
-NOTCH_APP = Path(__file__).resolve().parent / "notch/.build/release/CallNotch"
-SOUNDS = Path(__file__).resolve().parent / "sounds"
-CUES = ("start", "pause", "stop", "wait", "ready")  # sounds/<name>.wav, rendered by sounds/make.py; Listen plays the same files
+REPO = Path(__file__).resolve().parent
+# The notch: an installed CallNotch.app first, then this checkout's build (scripts/build-app.sh, or a plain swift build).
+NOTCH_APP = next((p for p in (Path("/Applications/CallNotch.app/Contents/MacOS/CallNotch"),
+                              Path.home() / "Applications/CallNotch.app/Contents/MacOS/CallNotch",
+                              REPO / "app/dist/CallNotch.app/Contents/MacOS/CallNotch",
+                              REPO / "app/.build/release/CallNotch") if p.exists()), REPO / "app/.build/release/CallNotch")
+SOUNDS = REPO / "app/Sources/CallNotchKit/Resources/sounds"
+CUES = ("start", "pause", "stop", "wait", "ready")  # <name>.wav in SOUNDS, rendered by app/scripts/make-sounds.py; the app plays the same files
 
 
 def volume(raw: str) -> float:
@@ -291,7 +296,7 @@ def selftest() -> None:
     write_closed([["user", "bye"]], 42.5)
     assert json.loads(INBOX.read_text().splitlines()[-1]) == {"event": "closed", "seconds": 42.5, "transcript": [["user", "bye"]]}
     assert json.loads(next(STATE.glob("transcript-*.json")).read_text())["seconds"] == 42.5
-    assert all((SOUNDS / f"{n}.wav").exists() for n in CUES), "a cue file is missing; run sounds/make.py"
+    assert all((SOUNDS / f"{n}.wav").exists() for n in CUES), "a cue file is missing; run app/scripts/make-sounds.py"
     assert SIGN_OFF in SOLO_INSTRUCTIONS  # the solo voice can hang up too
     assert volume("0.5") == 0.5 and volume("off") == volume("") == volume("-1") == 0.0
     print("ok")

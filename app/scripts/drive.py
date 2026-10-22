@@ -1,9 +1,9 @@
-"""Fake bridge for CallNotch, no call: launches .build/release/CallNotch with CALL_BRIDGE_PID set to
+"""Fake bridge for CallNotch, no call: launches the app's CallNotch (app/.build/release) with CALL_BRIDGE_PID set to
 this process, then writes ~/.claude-call/state.json at 20 Hz cycling listening 3 s -> speaking 4 s ->
 thinking 3 s until stopped. SIGUSR1 (the card's mute) toggles "muted"; SIGINT (Ctrl-C, or the card's
 hang-up) writes off, sends the app SIGTERM like bridge.py, and exits.
 
-  python3 drive.py            # from notch/, after swift build -c release
+  python3 app/scripts/drive.py     # after `cd app && swift build -c release`
 """
 import json, math, os, random, signal, subprocess, time
 from pathlib import Path
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGUSR1, toggle)
     signal.signal(signal.SIGINT, signal.default_int_handler)  # a shell's `&` starts us with SIGINT ignored
     write("listening", 0.0)
-    app = subprocess.Popen([Path(__file__).resolve().parent / ".build/release/CallNotch"],
+    app = subprocess.Popen([Path(__file__).resolve().parent.parent / ".build/release/CallNotch"],
                            env={**os.environ, "CALL_BRIDGE_PID": str(os.getpid())},
                            start_new_session=True)  # Ctrl-C reaches only us; the app gets SIGTERM below
     env = speech()

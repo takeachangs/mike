@@ -5,7 +5,7 @@ description: Start a voice call where GPT-Live handles the mic and speaker and t
 
 # /call — voice front end, this session as the brain
 
-The tool lives in `~/projects/call-notch`: `bridge.py` runs the OpenAI Live session on the mic and speaker with the voice prompt from `prompt.txt`, and `notch/` is the notch indicator app. Every question the voice cannot answer itself becomes a delegation line in `~/.claude-call/inbox.jsonl`. You answer each one from the notes folder and hand the text back with `bridge.py say`.
+The tool lives in `~/projects/call-notch`: `bridge.py` runs the OpenAI Live session on the mic and speaker with the voice prompt from `prompt.txt`, and CallNotch.app (from `app/`) is the notch. Every question the voice cannot answer itself becomes a delegation line in `~/.claude-call/inbox.jsonl`. You answer each one from the notes folder and hand the text back with `bridge.py say`.
 
 ## Steps
 
@@ -53,13 +53,13 @@ If the tool cannot wait on a file, poll instead: after step 2, loop on `tail -n 
 
 ## The notch app
 
-Build once and after editing `notch/Sources/`:
+CallNotch.app (built and installed by SETUP.md step 2) is the notch. If it is already running on its own, it shows the call; otherwise the bridge starts it for the length of the call. After pulling changes, rebuild and reinstall:
 
 ```bash
-cd ~/projects/call-notch/notch && swift build -c release
+cd ~/projects/call-notch/app && scripts/build-app.sh && cp -R dist/CallNotch.app /Applications/
 ```
 
-To try it without a call: `python3 drive.py` from `notch/`, which launches the app against a fake bridge.
+To try it without a call: `python3 ~/projects/call-notch/app/scripts/drive.py` (after `swift build -c release` in `app/`), which launches the notch against a fake bridge.
 
 ## Notes
 

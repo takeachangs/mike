@@ -1,76 +1,74 @@
-# call-notch
+# CallNotch
 
-A voice front end for my course-notes bundle. OpenAI GPT-Live handles the
-mic and speaker; a Claude Code session answers from the notes; a small
-macOS app extends the MacBook notch to the left while the call runs, in
-the style of boring.notch.
+A Mac app that lives in your MacBook's notch. Click the notch to:
 
-```
-bridge.py     GPT-Live session (client delegation). Delegations go to
-              ~/.claude-call/inbox.jsonl; replies come back via
-              `bridge.py say ID "text"` / `bridge.py note ID "text"`.
-prompt.txt    the voice model's instructions
-notch/        the notch indicator (SwiftUI), driven by ~/.claude-call/state.json
-```
+- **Call**: talk to OpenAI's GPT-Live voice model (bring your own API key).
+- **Listen**: transcribe a lecture or meeting live, on this Mac. The speech
+  model (Parakeet Ultra) runs on the Neural Engine; audio is never saved
+  or uploaded. The transcript has one paragraph per clock minute.
+- **Library**: every past call and recording as a card. Search, read,
+  copy, export, or move to the Trash.
 
-The Claude Code side is a skill in the notes bundle (`.claude/skills/call/`)
-that watches the inbox and answers each delegation.
+While a session runs, an amber orb grows out of the notch; click it for the
+timer and the pause/mute and stop/hang-up buttons. Short, quiet cue sounds
+mark start, pause and stop.
 
-## Set up
+It also works as the voice and recording front end for a coding agent:
+the `/call` and `/listen` skills in `skill/` let a Claude Code session open
+on a notes folder answer questions by voice or write notes from a
+recording, with the same notch showing the session.
 
-Tell your coding agent to "set this up" and point it at [SETUP.md](SETUP.md).
-It checks the prerequisites, builds the app, tests the key, personalises
-the prompt and installs the agent-side skill from `skill/` into your notes
-folder.
+## Install
 
-## Run
+Requires macOS 14 or later on Apple Silicon.
 
 ```bash
-cd notch && swift build -c release && cd ..   # once, and after editing Sources/
-uv run bridge.py                              # start a call; Ctrl-C hangs up
+cd app && scripts/build-app.sh          # builds and signs dist/CallNotch.app (ad-hoc unless SIGN_IDENTITY is set)
+cp -R dist/CallNotch.app /Applications/
+open /Applications/CallNotch.app
 ```
 
-Needs `OPENAI_API_KEY` in the environment. To try the notch app without a
-call: `cd notch && python3 drive.py & .build/release/CallNotch`.
+The first launch shows a short setup window: allow the microphone,
+optionally download the speech model up front (about 600 MB, once), and
+paste an OpenAI API key if you want calls (it is stored in your Keychain).
+Settings has the same controls plus sound volume and "Open at login".
 
-## State file
+## Layout
 
-```json
-{"state": "listening" | "thinking" | "speaking" | "off", "level": 0.0}
+```
+app/                    the Swift package (see app/Package.swift)
+  Sources/CallNotchKit  the library: recorder, Live call, state file, sessions, transcript, cues, Keychain
+  Sources/CallNotch     the app: notch panel, Library, Settings
+  Sources/Listen        the recorder as a command, for the /listen skill
+  Tests/                swift-testing unit tests
+  Resources/            Info.plist, entitlements, icon
+  scripts/              build-app.sh, make-icon.swift, make-sounds.py, drive.py (fake session for the notch)
+bridge.py               the agent-mode call: GPT-Live with client delegation, answered by a coding agent
+prompt.txt              the voice prompt for agent-mode calls
+skill/                  the agent-side /call and /listen procedures, installed into a notes folder
 ```
 
-`thinking` while a delegation is pending, `speaking` while audio is playing,
-`level` is the mic or speaker RMS in 0–1. The app quits on `off` or when the
-file goes stale for 3 s. Saying "Hanging up now." (the prompt's fixed
-sign-off) closes the session.
+Runtime files live in `~/.claude-call/`, shared by the app, `bridge.py` and
+the skills: `state.json` (what the notch draws), `listen-<stamp>.txt`
+transcripts with optional `.md` notes, `transcript-<stamp>.json` calls, and
+the agent-mode inbox and outbox.
 
-## /listen
-
-`listen/` is a second, separate feature: it transcribes a lecture live on
-the Mac (Parakeet Ultra on the Neural Engine, no audio saved, nothing
-uploaded) into `~/.claude-call/listen-<stamp>.txt`, one paragraph per
-clock minute, and shows it in the notch (its pause and stop buttons). The
-agent-side skill (`skill/listen/`) starts it and writes a summary, key
-points and to-dos next to the transcript when it stops.
+## Develop
 
 ```bash
-cd listen && swift build -c release        # once, and after editing Sources/
+cd app && swift build && swift test     # build everything, run the unit tests
+uv run bridge.py selftest               # the agent-mode bridge's offline checks
+.build/debug/CallNotch                  # run the app from the build folder (from app/)
+python3 scripts/drive.py                # cycle the notch through call states with no call (after a release build)
+.build/release/Listen out.txt --file talk.wav   # play a recording through the recorder in real time
 ```
 
-## Sounds
+Releases: `SIGN_IDENTITY="Developer ID Application: …" NOTARY_PROFILE=<profile> scripts/build-app.sh`
+signs with the hardened runtime, notarizes and staples. CI (`.github/workflows/ci.yml`) runs the tests and
+builds the app on every push; pushing a `v*` tag attaches the zip to a GitHub release.
 
-Both the call and `/listen` play short, quiet cues from `sounds/` (start,
-pause, stop, waiting, answer ready). `CALL_SOUND_VOLUME` sets the level
-(`afplay -v`, default 0.25) and `0` turns them off. `sounds/make.py`
-renders them with [earshot](https://github.com/Leonxlnx/earshot)'s DSP.
+## Agent mode
 
-## The notch app on its own
-
-Start the notch app by itself and it stays at the notch: click the notch
-for Call (a plain GPT-Live conversation, `bridge.py solo`, no agent),
-Listen (a recording) or Library (every past call and recording as a card
-you can open and search). Sessions a skill starts show up in it too.
-
-```bash
-cd notch && swift build -c release && .build/release/CallNotch
-```
+Point your coding agent at [SETUP.md](SETUP.md) and say "set this up". It
+checks the prerequisites, builds the app, tests the key, personalises
+`prompt.txt` and installs the skills into your notes folder.

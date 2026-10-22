@@ -5,14 +5,14 @@ description: Transcribe a lecture or meeting live on this Mac (on-device, nothin
 
 # /listen — live on-device transcript, this session writes the notes
 
-The recorder lives in `~/projects/call-notch/listen`. It transcribes the microphone with Parakeet Ultra on the Neural Engine and keeps a transcript with one paragraph per clock minute (`14:05 Alright, so today…`). No audio is saved, and nothing leaves the Mac while it listens. If the notch app is built, it shows the recording like a call: clicking the orb opens a card that reads Recording or Paused, with a timer, a pause button and a stop button.
+The recorder is the `Listen` command inside CallNotch.app (built from `~/projects/call-notch/app`). It transcribes the microphone with Parakeet Ultra on the Neural Engine and keeps a transcript with one paragraph per clock minute (`14:05 Alright, so today…`). No audio is saved, and nothing leaves the Mac while it listens. If the notch app is built, it shows the recording like a call: clicking the orb opens a card that reads Recording or Paused, with a timer, a pause button and a stop button.
 
 ## Steps
 
-1. Build once, and after any edit under `listen/Sources/`:
+1. Make sure CallNotch.app is installed (`ls /Applications/CallNotch.app/Contents/MacOS/Listen`). If not, build and install it once, and again after pulling changes:
 
    ```bash
-   cd ~/projects/call-notch/listen && swift build -c release
+   cd ~/projects/call-notch/app && scripts/build-app.sh && cp -R dist/CallNotch.app /Applications/
    ```
 
    The first run downloads the model (about 600 MB) and takes a minute or two to load.
@@ -20,7 +20,7 @@ The recorder lives in `~/projects/call-notch/listen`. It transcribes the microph
 2. Pick the transcript path, `~/.claude-call/listen-<stamp>.txt` with the stamp from `date +%Y%m%dT%H%M`, and start the recorder in a terminal tab the person can see and stop with Ctrl-C:
 
    ```bash
-   ~/projects/call-notch/listen/.build/release/Listen ~/.claude-call/listen-<stamp>.txt
+   /Applications/CallNotch.app/Contents/MacOS/Listen ~/.claude-call/listen-<stamp>.txt
    ```
 
    Use the tool's "run in a terminal tab" action, not a blocking shell call. Wait for it to print `listening started`. The first time, macOS asks to let the terminal app use the microphone. Tell the person it is listening and how to stop it.
@@ -43,12 +43,12 @@ The recorder lives in `~/projects/call-notch/listen`. It transcribes the microph
 5. Play the ready cue so the person knows the notes are there, then tell them, in a few lines: how long it ran, the to-dos, and the paths of both files.
 
    ```bash
-   afplay -v "${CALL_SOUND_VOLUME:-0.25}" ~/projects/call-notch/sounds/ready.wav
+   afplay -v "${CALL_SOUND_VOLUME:-0.25}" /Applications/CallNotch.app/Contents/Resources/CallNotch_CallNotchKit.bundle/Contents/Resources/sounds/ready.wav
    ```
 
 ## Notes
 
-- The recorder plays its own quiet cues from `sounds/` when it starts, pauses, resumes and stops. `CALL_SOUND_VOLUME` sets the level (default 0.25) and `0` turns them off.
+- The recorder plays its own quiet cues when it starts, pauses, resumes and stops. `CALL_SOUND_VOLUME` sets the level (default 0.25) and `0` turns them off.
 - `/listen` and `/call` both drive the notch through `~/.claude-call/state.json`, so run one at a time.
 - While paused, the audio is replaced by silence, so the minute stamps stay on the clock; the paused stretch is simply missing from the transcript.
 - To test without the microphone: `Listen <out.txt> --file recording.wav` plays a recording through the same path in real time.

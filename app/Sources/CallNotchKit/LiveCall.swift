@@ -1,0 +1,360 @@
+import AVFoundation
+import Foundation
+import os
+
+public struct LiveCallError: LocalizedError {
+    public let message: String
+    public var errorDescription: String? { message }
+}
+
+/// One solo GPT-Live call on the default mic and speaker: bridge.py's `solo` mode without Python. No delegation.
+/// Socket events, ending and the transcript run on `q`; the levels the notch draws sit in `meter`, which the audio
+/// threads and the state ticker touch.
+public final class LiveCall: @unchecked Sendable {
+    /// bridge.py's SOLO_INSTRUCTIONS, verbatim.
+    public static let soloInstructions = "You are a friendly, concise voice assistant on the user's Mac. Answer from your own knowledge in short spoken "
+        + "sentences. You have no tools, no internet and no access to the user's files, so say so plainly when asked for "
+        + "something current or personal. When the user says goodbye, say goodbye and end with exactly: Hanging up now."
+    static let signOff = "Hanging up now"  // hearing it in the output transcript ends the call
+    static let speechLevel = 0.15  // ponytail: mic rms that counts as speech for the idle guard, a guess copied from bridge.py
+    static let idleAfter: TimeInterval = 90, closeWait: TimeInterval = 5, startWait: TimeInterval = 15
+    static let chunkBytes = LiveProtocol.rate / 10 * 2  // 100 ms of PCM16
+
+    public var onEnd: ((URL?) -> Void)?
+    public var onError: ((String) -> Void)?
+    public var muted: Bool { meter.withLock { $0.muted } }
+
+    struct Meter {
+        var mic = 0.0, spk = 0.0, spkAt = 0.0, activeAt = 0.0
+        var queued: [Double] = []  // levels of the 100 ms output slices scheduled and not yet played
+        var muted = false, sending = false
+    }
+
+    private enum Phase { case idle, connecting, live, closing, done }
+
+    private let model: String, instructions: String
+    private let task: URLSessionWebSocketTask?
+    private let q = DispatchQueue(label: "callnotch.call")
+    private let meter = OSAllocatedUnfairLock(initialState: Meter())
+    private let ticker: StateTicker
+    private let mic = AVAudioEngine(), out = AVAudioEngine(), player = AVAudioPlayerNode()
+    private var micPending = Data()  // tap thread only
+    private var audioOn = false
+    private var observers: [NSObjectProtocol] = []
+    // on q
+    private var phase = Phase.idle
+    private var waiter: CheckedContinuation<Void, Error>?
+    private var transcript: [[String]] = []
+    private var seconds: Double?, reason: String?, signedOff = false
+
+    static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
+
+    public init(apiKey: String, instructions: String, model: String = "gpt-live-1") {
+        self.model = model
+        self.instructions = instructions
+        task = URL(string: LiveProtocol.endpoint).map { url in
+            var req = URLRequest(url: url)
+            req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            return URLSession.shared.webSocketTask(with: req)
+        }
+        ticker = StateTicker { [meter] in
+            let m = meter.withLock { $0 }
+            let speaking = !m.queued.isEmpty || LiveCall.now - m.spkAt < 0.3
+            return SessionState(state: speaking ? "speaking" : "listening", level: speaking ? m.queued.first ?? m.spk : m.mic,
+                                muted: m.muted, pid: getpid(), mode: .call)
+        }
+    }
+
+    /// Opens the mic and speaker, then the session; returns once session.started arrived.
+    public func start() async throws {
+        guard await AVCaptureDevice.requestAccess(for: .audio) else {
+            throw LiveCallError(message: "Microphone access is off: System Settings > Privacy & Security > Microphone")
+        }
+        do {
+            try startAudio()
+            try await connect()
+        } catch {
+            teardownAudio()
+            throw error
+        }
+    }
+
+    public func hangUp() { q.async { self.close("hung up") } }
+
+    public func toggleMute() {
+        q.async { [self] in
+            guard phase == .live else { return }
+            let m = meter.withLock { $0.muted.toggle(); return $0.muted }
+            send(LiveProtocol.mute(m))
+            (m ? Cue.pause : Cue.start).play()
+            Log.call.info("\(m ? "mic muted" : "mic live", privacy: .public)")
+        }
+    }
+
+    // MARK: session
+
+    /// Socket, session.start, and the wait for session.started (or an error, a refused handshake, the timeout).
+    func connect() async throws {
+        guard let task else { throw LiveCallError(message: "bad endpoint URL") }
+        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+            q.async { [self] in
+                phase = .connecting
+                waiter = c
+                task.resume()
+                send(LiveProtocol.sessionStart(model: model, instructions: instructions))
+                receive()
+                q.asyncAfter(deadline: .now() + LiveCall.startWait) { [self] in failStart("No answer from OpenAI within \(Int(LiveCall.startWait)) s") }
+            }
+        }
+    }
+
+    private func receive() {
+        task?.receive { [self] result in
+            q.async { [self] in
+                switch result {
+                case .success(.string(let s)): handle(LiveProtocol.decode(Data(s.utf8))); receive()
+                case .success(.data(let d)): handle(LiveProtocol.decode(d)); receive()
+                case .success: receive()
+                case .failure(let error): socketFailed(error)
+                }
+            }
+        }
+    }
+
+    private func handle(_ event: LiveProtocol.ServerEvent) {
+        switch event {
+        case .started:
+            guard phase == .connecting, let c = waiter else { return }
+            phase = .live
+            waiter = nil
+            meter.withLock { $0.activeAt = LiveCall.now; $0.sending = true }
+            ticker.start()
+            Cue.start.play()
+            Log.call.info("call started")
+            watch()
+            c.resume()
+        case .audio(let pcm): play(pcm)
+        case .inputTranscript(let d): add("user", d)
+        case .outputTranscript(let d):
+            add("assistant", d)
+            if !signedOff, transcript.last?[1].contains(LiveCall.signOff) == true {
+                signedOff = true  // watch() closes once the goodbye has played
+                Log.call.info("sign-off heard")
+            }
+        case .usage(let s): seconds = s
+        case .error(let message):
+            Log.call.error("error: \(message, privacy: .public)")
+            if phase == .connecting { failStart("OpenAI: \(message)") } else { report(message) }
+        case .closed(let s, let r):
+            seconds = s ?? seconds
+            reason = r
+            if phase == .connecting { failStart("OpenAI closed the session: \(r ?? "no reason")") } else { finish() }
+        case .other: break
+        }
+    }
+
+    private func socketFailed(_ error: Error) {
+        switch phase {
+        case .connecting:
+            let status = (task?.response as? HTTPURLResponse)?.statusCode
+            if status == 401 || status == 403 { failStart("OpenAI refused the API key (HTTP \(status ?? 0))") }
+            else { failStart("Could not reach OpenAI\(status.map { " (HTTP \($0))" } ?? ""): \(error.localizedDescription)") }
+        case .live:
+            report("Connection lost: \(error.localizedDescription)")
+            reason = "connection lost"
+            finish()
+        case .closing:
+            reason = reason ?? "socket closed before session.closed"
+            finish()
+        case .idle, .done: break
+        }
+    }
+
+    private func failStart(_ message: String) {
+        guard phase == .connecting, let c = waiter else { return }
+        phase = .done
+        waiter = nil
+        task?.cancel(with: .goingAway, reason: nil)
+        Log.call.error("start failed: \(message, privacy: .public)")
+        c.resume(throwing: LiveCallError(message: message))
+    }
+
+    /// Every 100 ms while live: close once the sign-off has played out, or after `idleAfter` with no speech and no audio.
+    private func watch() {
+        q.asyncAfter(deadline: .now() + 0.1) { [self] in
+            guard phase == .live else { return }
+            let m = meter.withLock { $0 }, now = LiveCall.now
+            if signedOff, m.queued.isEmpty, now - m.spkAt > 0.8 { close("sign-off played") }
+            else if now - max(m.activeAt, m.spkAt) > LiveCall.idleAfter { close("idle for \(Int(LiveCall.idleAfter)) s") }
+            else { watch() }
+        }
+    }
+
+    /// session.close, then up to `closeWait` for session.closed and its final usage.
+    private func close(_ why: String) {
+        if phase == .connecting { failStart("Hung up before the call started"); return }
+        guard phase == .live else { return }
+        phase = .closing
+        meter.withLock { $0.sending = false }
+        Log.call.info("closing: \(why, privacy: .public)")
+        send(LiveProtocol.close)
+        q.asyncAfter(deadline: .now() + LiveCall.closeWait) { [self] in
+            if phase == .closing { reason = reason ?? "no session.closed within \(Int(LiveCall.closeWait)) s"; finish() }
+        }
+    }
+
+    private func finish() {
+        guard phase == .live || phase == .closing else { return }
+        phase = .done
+        teardownAudio()
+        task?.cancel(with: .normalClosure, reason: nil)
+        ticker.stop(mode: .call)
+        Cue.stop.play()
+        Log.call.info("closed: \(self.reason ?? "?", privacy: .public), \(self.seconds.map { "\($0)" } ?? "null", privacy: .public) s billed")
+        let url = save()
+        DispatchQueue.main.async { self.onEnd?(url) }
+    }
+
+    /// `{"seconds": <Double or null>, "transcript": [[role, text], ...]}`, like bridge.py's write_closed (no inbox line).
+    private func save() -> URL? {
+        let url = Paths.newCallTranscript()
+        do {
+            try Paths.ensureStateDir()
+            let body: [String: Any] = ["seconds": seconds ?? NSNull(), "transcript": transcript]
+            try JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+            return url
+        } catch {
+            Log.call.error("transcript not saved: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// Consecutive deltas of one role make one turn; the last 40 turns are kept, as in bridge.py's add().
+    private func add(_ role: String, _ delta: String) {
+        if transcript.last?.first == role { transcript[transcript.count - 1][1] += delta } else {
+            transcript.append([role, delta])
+            if transcript.count > 40 { transcript.removeFirst(transcript.count - 40) }
+        }
+    }
+
+    private func send(_ text: String) {
+        task?.send(.string(text)) { error in
+            if let error { Log.call.error("send failed: \(error.localizedDescription, privacy: .public)") }
+        }
+    }
+
+    private func report(_ message: String) {
+        DispatchQueue.main.async { self.onError?(message) }
+    }
+
+    // MARK: audio
+
+    private func startAudio() throws {
+        audioOn = true
+        guard let float = AVAudioFormat(standardFormatWithSampleRate: Double(LiveProtocol.rate), channels: 1) else {
+            throw LiveCallError(message: "no 24 kHz audio format")
+        }
+        out.attach(player)
+        out.connect(player, to: out.mainMixerNode, format: float)
+        try out.start()
+        player.play()
+        try startMic()
+        // A new default device (AirPods connecting) stops an engine: start it again on the new one.
+        observers = [mic, out].map { engine in
+            NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [self] _ in
+                q.async { self.restart(engine) }
+            }
+        }
+    }
+
+    private func startMic() throws {
+        let input = mic.inputNode, format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0,
+              let pcm = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(LiveProtocol.rate), channels: 1, interleaved: true),
+              let conv = AVAudioConverter(from: format, to: pcm) else { throw LiveCallError(message: "No usable microphone") }
+        conv.downmix = true
+        input.removeTap(onBus: 0)
+        micPending = Data()
+        input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(format.sampleRate / 10), format: format) { [self] buf, _ in take(buf, conv) }
+        mic.prepare()
+        try mic.start()
+    }
+
+    /// Tap thread: resample to 24 kHz mono PCM16, then level, idle clock and input_audio.append per 100 ms.
+    private func take(_ buf: AVAudioPCMBuffer, _ conv: AVAudioConverter) {
+        let cap = AVAudioFrameCount(Double(buf.frameLength) * conv.outputFormat.sampleRate / buf.format.sampleRate) + 32
+        guard let pcm = AVAudioPCMBuffer(pcmFormat: conv.outputFormat, frameCapacity: cap) else { return }
+        var fed = false, error: NSError?
+        conv.convert(to: pcm, error: &error) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }  // not .endOfStream: that would end the converter for good
+            fed = true
+            status.pointee = .haveData
+            return buf
+        }
+        guard error == nil, let ch = pcm.int16ChannelData else { return }
+        micPending.append(UnsafeBufferPointer(start: ch[0], count: Int(pcm.frameLength)))
+        while micPending.count >= LiveCall.chunkBytes {
+            let chunk = Data(micPending.prefix(LiveCall.chunkBytes))
+            micPending.removeFirst(LiveCall.chunkBytes)
+            let level = LiveProtocol.rms(chunk)
+            let sending = meter.withLock { m in
+                m.mic = level
+                if level > LiveCall.speechLevel { m.activeAt = LiveCall.now }
+                return m.sending
+            }
+            if sending { send(LiveProtocol.appendAudio(chunk)) }
+        }
+    }
+
+    /// Schedules output audio in 100 ms slices; each slice's completion, at playback, moves the speaking clock.
+    // ponytail: audio already queued keeps playing after the user interrupts, as in bridge.py; stop the player on input_transcript if it bothers
+    private func play(_ pcm: Data) {
+        let format = player.outputFormat(forBus: 0), samples = pcm.count / 2
+        for start in stride(from: 0, to: samples, by: LiveProtocol.rate / 10) {
+            let n = min(LiveProtocol.rate / 10, samples - start)
+            guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(n)), let ch = buf.floatChannelData else { return }
+            buf.frameLength = AVAudioFrameCount(n)
+            pcm.withUnsafeBytes { raw in
+                for i in 0..<n { ch[0][i] = Float(raw.loadUnaligned(fromByteOffset: (start + i) * 2, as: Int16.self)) / 32768 }
+            }
+            let level = LiveProtocol.rms(pcm.subdata(in: start * 2 ..< (start + n) * 2))
+            meter.withLock { $0.queued.append(level) }
+            player.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [meter] _ in
+                meter.withLock { m in
+                    if !m.queued.isEmpty { m.spk = m.queued.removeFirst() }
+                    m.spkAt = LiveCall.now
+                }
+            }
+        }
+    }
+
+    private func restart(_ engine: AVAudioEngine) {
+        guard phase == .live || phase == .closing else { return }
+        do {
+            if engine === mic {
+                mic.stop()
+                try startMic()
+            } else {
+                player.stop()  // drops what was scheduled; its completions may not come, so forget their levels
+                meter.withLock { $0.queued.removeAll() }
+                try out.start()
+                player.play()
+            }
+            Log.call.info("audio device changed, restarted")
+        } catch {
+            report("Audio device change failed: \(error.localizedDescription)")
+            close("audio device lost")
+        }
+    }
+
+    private func teardownAudio() {
+        guard audioOn else { return }
+        audioOn = false
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers = []
+        mic.inputNode.removeTap(onBus: 0)
+        mic.stop()
+        player.stop()
+        out.stop()
+    }
+}

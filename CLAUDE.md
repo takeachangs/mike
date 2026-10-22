@@ -4,76 +4,83 @@ Guidance for Claude Code when working in this repository.
 
 # What this is
 
-A voice front end for a coding-agent session. OpenAI GPT-Live (`gpt-live-1`, client delegation) handles the mic and speaker; an agent session open on some notes folder answers the questions; a small macOS app shows the call state in the MacBook notch. A second, separate feature, `/listen`, transcribes a lecture on-device (Parakeet Ultra via FluidAudio) and shows it in the same notch; the agent session writes notes from the transcript afterwards. `README.md` is the human overview, `SETUP.md` is the install procedure for a coding agent.
+CallNotch, a Mac app that lives in the MacBook notch. On its own it makes plain GPT-Live voice calls (`gpt-live-1`, user's own OpenAI key), records lectures with on-device transcription (Parakeet Ultra via FluidAudio), and keeps a Library of both. It is also the notch for a coding-agent workflow: `bridge.py` runs agent-mode calls (client delegation, answered by an agent session on a notes folder) and the `Listen` command records for the `/listen` skill. `README.md` is the human overview, `SETUP.md` is the agent-mode install procedure for a coding agent.
 
 # Layout
 
 ```
-bridge.py                         the whole bridge: Live session, audio, inbox/outbox, state file, notch launch (single file, uv inline deps)
-prompt.txt                        the voice model's instructions, read once at bridge start; personalised for its owner
-notch/Sources/CallNotch/main.swift  the notch app (SwiftUI in an NSPanel), one file: the session indicator, and when started on its own a resident app with Call / Listen / Library and a Library window of past sessions
-notch/drive.py                    fake bridge: launches the app, cycles states into state.json, answers its mute/hang-up signals; test without a call
-listen/Sources/Listen/main.swift  the /listen recorder: mic -> Parakeet Ultra on the Neural Engine -> per-minute timestamped transcript; drives the notch like the bridge (one file, FluidAudio its only dependency)
-sounds/*.wav, sounds/make.py      the cues both sides play (start, pause, stop, wait, ready) and the script that renders them (needs an earshot install; not a runtime dependency)
-skill/SKILL.md                    generic copy of the agent-side /call procedure, installed into a notes folder by SETUP.md
-skill/listen/SKILL.md             generic copy of the agent-side /listen procedure
+app/Package.swift                    one SwiftPM package; FluidAudio is its only dependency
+app/Sources/CallNotchKit/            the library everything else is built on
+  Recorder.swift                       mic (or a file played in real time) -> Parakeet Ultra -> per-minute transcript; state file; cues
+  LiveCall.swift, LiveProtocol.swift   the solo GPT-Live call: WebSocket protocol codec, mic/speaker audio, state file, transcript file
+  StateFile.swift, Paths.swift         ~/.claude-call paths, the state file and its 20 Hz ticker, os.Logger categories
+  Sessions.swift, Transcript.swift     Library parsing of saved sessions; the per-minute transcript builder
+  Cues.swift, Keychain.swift           cue sounds (Resources/sounds, played with afplay); the OpenAI key in the Keychain
+app/Sources/CallNotch/               the app: notch panel and drawing, in-app sessions (Launch.swift), Library and Settings windows
+app/Sources/Listen/main.swift        the recorder as a command for the /listen skill; launches the notch if no resident app is up
+app/Tests/CallNotchKitTests/         swift-testing unit tests for the library
+app/Resources/                       Info.plist template, entitlements, AppIcon.icns
+app/scripts/                         build-app.sh (bundle, sign, notarize, zip), make-icon.swift, make-sounds.py (needs earshot), drive.py
+bridge.py                            agent-mode call: Live session, audio, inbox/outbox, state file, notch launch (single file, uv inline deps)
+prompt.txt                           the agent-mode voice prompt, read once at bridge start; personalised for its owner
+skill/SKILL.md, skill/listen/SKILL.md  generic copies of the agent-side /call and /listen procedures, installed into a notes folder
+.github/workflows/ci.yml             tests and an app build on every push; a v* tag publishes the zip as a release
 ```
 
-Runtime state lives outside the repo in `~/.claude-call/`: `context.txt` (written by the skill, optional), `inbox.jsonl`, `outbox.jsonl`, `state.json`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), `board/`, and per `/listen` a `listen-<stamp>.txt` transcript (paragraphs starting `HH:MM `) with the agent's `listen-<stamp>.md` notes beside it.
+Runtime state lives outside the repo in `~/.claude-call/`: `state.json`, `app.pid`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), `listen-<stamp>.txt` per recording (paragraphs starting `HH:MM `) with the agent's `listen-<stamp>.md` notes beside it, and for agent mode `context.txt`, `inbox.jsonl`, `outbox.jsonl` and `board/`. Settings (sound volume, onboarded) are in the app's UserDefaults; the OpenAI key is in the login Keychain (`com.takeachangs.callnotch`).
 
 # Commands
 
 ```bash
-uv run bridge.py selftest                      # local checks only, no API call, prints ok
-uv run bridge.py                               # start a real call (bills per second; see Rules)
-uv run bridge.py solo                          # a plain GPT-Live call: no delegation, SOLO_INSTRUCTIONS instead of prompt.txt (also bills)
-uv run bridge.py say  ID "text"                # spoken result for delegation ID
-uv run bridge.py note ID "text"                # quiet progress for delegation ID
-cd notch && swift build -c release             # build the app; needed after any edit under notch/Sources/
-cd notch && python3 drive.py                   # run the app against a fake bridge, no call (Ctrl-C stops both)
-notch/.build/release/CallNotch                 # the resident app: click the notch for Call (bridge.py solo) / Listen / Library; --selftest checks the session parser
-cd listen && swift build -c release            # build the recorder; needed after any edit under listen/Sources/ (first build ~3 min)
-listen/.build/release/Listen out.txt --file x.wav   # play a recording through the recorder in real time, notch included, no mic
+cd app && swift build && swift test                 # build everything and run the unit tests
+cd app && scripts/build-app.sh                      # dist/CallNotch.app + zip; SIGN_IDENTITY / NOTARY_PROFILE for a release
+app/.build/debug/CallNotch                          # the resident app from a dev build (notch click: Call / Listen / Library / Settings / Quit)
+python3 app/scripts/drive.py                        # the notch against a fake session, no call (needs a release build; Ctrl-C stops both)
+app/.build/release/Listen out.txt --file x.wav      # play a recording through the recorder in real time, notch included, no mic
+uv run bridge.py selftest                           # bridge offline checks, no API call, prints ok
+uv run bridge.py                                    # an agent-mode call (bills per second; see Rules)
+uv run bridge.py say  ID "text" / note ID "text"    # spoken result / quiet progress for delegation ID
 ```
 
-# How a call flows
+# How sessions run
 
-1. `bridge.py` opens the Live session (seeding `context.txt`, capped at 4000 characters, as a developer message if it exists), starts the mic and speaker streams, and launches `notch/.build/release/CallNotch` if it has been built.
-2. When the voice model delegates, the bridge appends `{"id", "offset_ms", "transcript"}` to the inbox. `transcript` is the last 12 `[role, text]` turns.
-3. The agent answers with `bridge.py say ID "..."`, which appends to the outbox. The bridge tails the outbox and forwards `say` as commentary and `note` as thinking on the Live session.
-4. Hang-up is Ctrl-C (also what the notch app's hang-up button sends), the voice saying the sign-off, or 90 s idle (no mic speech above `SPEECH_LEVEL`, no audio out, no pending delegation). All three send `session.close` and wait up to `CLOSE_WAIT` for `session.closed` and its final `usage.seconds`. The bridge then writes `{"event": "closed", "seconds": ..., "transcript": [...]}` to the inbox and saves the transcript file.
+- **App, solo call**: Settings' key (or `OPENAI_API_KEY`) -> `LiveCall` in the app process. Hang-up is the card's button, the voice saying the sign-off, or 90 s idle; the transcript is saved like bridge.py's.
+- **App, recording**: `Recorder` in the app process, into `~/.claude-call/listen-<stamp>.txt`. The model downloads on first use with progress in the card (or ahead of time from Settings).
+- **Agent-mode call**: `bridge.py` opens the Live session (seeding `context.txt`, capped at 4000 characters), writes delegations `{"id", "offset_ms", "transcript"}` to the inbox, forwards the agent's `say` / `note` from the outbox, and on hang-up (Ctrl-C, the notch's button, the sign-off, 90 s idle) writes `{"event": "closed", "seconds", "transcript"}` to the inbox and saves the transcript file.
+- **Skill recording**: `Listen <path>` (the binary inside CallNotch.app, or `app/.build/release/Listen`), stopped by Ctrl-C or the notch's stop button.
 
 # Contracts that must not drift
 
 Changing any of these means changing every side in the same commit.
 
-- **`Hanging up now`**: `SIGN_OFF` in `bridge.py`, the "Ending the call" section of `prompt.txt`, `SOLO_INSTRUCTIONS`, and both skill files. Hearing it in the output transcript closes the session.
-- **`Dates you may answer directly`**: the heading `prompt.txt` lets the voice answer from, and the heading the skill writes into `context.txt`.
-- **`Board open:`**: the prefix `prompt.txt` tells the voice to expect on a board result, and the prefix the skill tells the agent to send.
-- **State file**: `{"state": "listening" | "thinking" | "speaking" | "off", "level": 0..1, "muted": bool, "pid": int, "mode": "call" | "listen"}`, written atomically (temp file + `os.replace`, or `Data.write(options: .atomic)` in `Listen`) every 50 ms even when unchanged. `Listen` only ever writes `listening` and `off`, with `muted` meaning paused. The app treats a file older than 3 s as a dead bridge and quits, and also quits on `off` or SIGTERM. `thinking` means a delegation has had no `say` yet. `muted` is the server-side mic mute, so the app shows what the bridge actually did.
-- **App → bridge signals**: the bridge launches the app with `CALL_BRIDGE_PID` in its environment. The app's mute button sends SIGUSR1 (bridge toggles `session.input_audio.mute`/`unmute`), its hang-up button sends SIGINT (the Ctrl-C path). Without the variable the buttons only print. `Listen` launches the app the same way, plus `CALL_NOTCH_MODE=listen` so the card reads Recording/Paused with pause/play and stop icons, and answers the same signals: SIGUSR1 pauses (audio replaced by silence so the minute stamps stay on the clock), SIGINT stops (on the mic; a `--file` test run has no stop handler, so Ctrl-C just kills it). Without `CALL_NOTCH_MODE` the card looks like a call.
-- **Resident app**: `CallNotch` started without `CALL_BRIDGE_PID` stays at the notch, writes its pid to `~/.claude-call/app.pid` (removed on Quit or SIGTERM; a second copy exits), signals the session named by the state file's `pid` and labels it by `mode`. `bridge.py` and `Listen` launch their own notch only when `app.pid` names no live process. It starts calls as `zsh -lic 'exec uv run bridge.py solo'` and recordings as `Listen ~/.claude-call/listen-<stamp>.txt`, both logging to `~/.claude-call/app.log`.
-- **Cue sounds**: `start` (also resume), `pause`, `stop`, `wait`, `ready` in `sounds/`, played with `afplay -v $CALL_SOUND_VOLUME` (default 0.25, `0` = off) by `bridge.py` (call start, mute/unmute, each delegation, its first `say`, hang-up), `Listen` (start, pause/resume, stop) and the listen skill (`ready` once the notes are written). A renamed file means changing all three; `selftest` checks the files exist.
+- **`Hanging up now`**: `SIGN_OFF` in `bridge.py`, the "Ending the call" section of `prompt.txt`, `SOLO_INSTRUCTIONS` in bridge.py and `LiveCall.soloInstructions` (identical text), and both skill files. Hearing it in the output transcript closes the session.
+- **`Dates you may answer directly`** and **`Board open:`**: between `prompt.txt` and the /call skill.
+- **State file**: `{"state": "listening" | "thinking" | "speaking" | "off", "level": 0..1, "muted": bool, "pid": int, "mode": "call" | "listen"}`, written atomically every 50 ms even when unchanged, and `off` last. Writers: `bridge.py`, `Recorder` and `LiveCall` (`SessionState`/`StateTicker`). The notch treats a file older than 3 s as a dead session. `muted` means paused for a recording; `thinking` means a delegation has no `say` yet.
+- **Session -> notch launch and signals**: a session launches `CallNotch` with `CALL_BRIDGE_PID` (and `CALL_NOTCH_MODE=listen` for a recording) only when `app.pid` names no live process; that notch quits with the session. The card's mute/pause sends SIGUSR1 and hang-up/stop sends SIGINT to the state file's `pid` (or `CALL_BRIDGE_PID`); for a session inside the resident app it calls the session directly.
+- **Resident app**: `CallNotch` without `CALL_BRIDGE_PID` stays at the notch, writes `app.pid` (removed on Quit or SIGTERM; a second copy exits) and shows any session from the state file.
+- **Cue sounds**: `start` (also resume/unmute), `pause`, `stop`, `wait`, `ready` in `app/Sources/CallNotchKit/Resources/sounds/`, played with `afplay -v <volume>` (default 0.25, `0` = off; the app's Settings, or `CALL_SOUND_VOLUME`) by bridge.py, the app and Listen, and by the listen skill (`ready`). bridge.py's `selftest` and the Swift tests check the files exist.
+- **Transcript files**: calls `{"seconds": number|null, "transcript": [[role, text], ...]}` (older ones are a bare list); recordings `HH:MM text` paragraphs. `Session.parse` reads both; keep it in step with the writers.
 - **Inbox and outbox line shapes**, as above. The bridge truncates outbox content at 1500 characters and empties both files at call start, so an agent can count lines from zero.
-- **Audio**: 24 kHz mono int16 PCM both ways.
+- **Audio**: 24 kHz mono int16 PCM both ways for GPT-Live.
 
 # Rules
 
-- **Never start a real call unless asked.** `uv run bridge.py` with no arguments opens a billed session and the microphone. Use `selftest`, `drive.py`, or hand-written inbox lines to test.
-- **Never start `Listen` on the mic unless asked**: it opens the microphone. Test with `--file`.
-- **The key stays in the environment.** `OPENAI_API_KEY` is read by the SDK. Never write it into a file here or anywhere else.
+- **Never start a real call unless asked**: `uv run bridge.py` and the app's Call open a billed session and the microphone. Test with `selftest`, the Swift tests, `drive.py`, or hand-written inbox lines.
+- **Never start a recording on the mic unless asked.** Test with `Listen --file`.
+- **The key stays out of files.** It lives in the Keychain or the environment. Never write it into the repo or anywhere else.
 - **Keep the repo out of iCloud-synced folders** (`~/Documents`, `~/Desktop`): the Swift build directory churns.
-- **Keep it small.** `bridge.py` is one file with three dependencies, the notch's `main.swift` is one file with none, and the recorder is one file with FluidAudio only. Do not add a dependency, a config file, or a module split for something a few lines can do. A deliberate shortcut gets a `# ponytail:` comment naming its ceiling.
-- **`skill/` stays generic** (both skill files). No names, courses, or paths from any one person's notes folder. The installed copy in a notes folder is where personal details and local rules go; the two are allowed to differ.
-- **Extend `selftest` when adding bridge logic** that can be checked without the API (file shapes, truncation, level maths).
-- Voice sessions bill for every second they are open, including silence and time spent waiting on the agent. Changes that add wait time before a `say` cost money on every call.
+- **Keep it small.** One package, FluidAudio as the only Swift dependency, `bridge.py` one file with three. No abstractions with one user, no config files. A deliberate shortcut gets a `ponytail:` comment naming its ceiling.
+- **`skill/` stays generic.** No names, courses, or paths from any one person's notes folder; the installed copy is where personal details go.
+- **Test what can be tested offline**: extend the Swift tests for library logic (parsing, transcript, protocol, state) and `selftest` for bridge logic.
+- **Bundle resources** are found through `Cue.resources` (Contents/Resources first), not `Bundle.module`, which only looks at the .app's top level, where code signing forbids files.
+- Voice sessions bill for every second they are open, including silence and time spent waiting on the agent.
 
 # Known gaps
 
-- `SPEECH_LEVEL` (idle guard mic threshold) is a guess; tune it in a real room so typing stays below it and quiet speech stays above.
-- A delegation that never gets a `say` keeps the call from idling out; Ctrl-C still ends it.
-- Audio already queued keeps playing after the user interrupts (marked `ponytail:` in `speaker()`).
-- `/listen` and a call both own `state.json`; run one at a time.
-- On laptop speakers without headphones, the `wait`/`ready` cues play into the open mic during a call; whether GPT-Live hears them as barge-in is untested.
-- Listen's minute stamps count audio samples: a gap in the audio (an input device switch, the Mac sleeping) shifts later stamps earlier by its length.
-- `seconds` is null when `session.closed` never arrives within `CLOSE_WAIT` and no usage update came before.
+- `SPEECH_LEVEL` / the 0.15 idle threshold is a guess; tune it in a real room.
+- No echo cancellation in either call path: on laptop speakers the voice can hear itself and the cue sounds. Headphones avoid it.
+- Audio already queued keeps playing after the user interrupts the voice.
+- A recording and a call both own `state.json`; run one at a time (the app enforces this for its own sessions).
+- Recording minute stamps count audio samples: a gap (an input device switch, the Mac sleeping) shifts later stamps earlier by its length.
+- Signing is ad-hoc unless `SIGN_IDENTITY` is set; an ad-hoc app runs only on the Mac that built it.
+- `seconds` is null when `session.closed` never arrives within 5 s and no usage update came before.
