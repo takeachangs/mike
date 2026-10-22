@@ -66,4 +66,13 @@ import Testing
         #expect(LiveCall.soloInstructions.contains(LiveCall.signOff))
         #expect(LiveCall.soloInstructions.hasSuffix("end with exactly: Hanging up now."))
     }
+
+    @Test func silenceGuardWarnsOnceThenHangsUp() {
+        #expect(LiveCall.silence(quiet: 5, limit: 30, warned: false) == (false, false))
+        #expect(LiveCall.silence(quiet: 20, limit: 30, warned: false) == (true, false))   // 10 s before: warn
+        #expect(LiveCall.silence(quiet: 25, limit: 30, warned: true) == (false, false))   // only once
+        #expect(LiveCall.silence(quiet: 30, limit: 30, warned: true) == (false, true))    // then hang up
+        #expect(LiveCall.silence(quiet: 9_999, limit: 0, warned: false) == (false, false))  // Never
+        #expect(LiveCall.silence(quiet: 6, limit: 15, warned: false) == (true, false))    // short limits warn early
+    }
 }

@@ -16,10 +16,13 @@ public final class LiveCall: @unchecked Sendable {
         + "sentences. You have no tools, no internet and no access to the user's files, so say so plainly when asked for "
         + "something current or personal. When the user says goodbye, say goodbye and end with exactly: Hanging up now."
     static let signOff = "Hanging up now"  // hearing it in the output transcript ends the call
-    static let speechLevel = 0.15  // ponytail: mic rms that counts as speech for the idle guard, a guess copied from bridge.py
-    static let idleAfter: TimeInterval = 90, closeWait: TimeInterval = 5, startWait: TimeInterval = 15
+    static let closeWait: TimeInterval = 5, startWait: TimeInterval = 15, silenceWarning: TimeInterval = 10
     static let chunkBytes = LiveProtocol.rate / 10 * 2  // 100 ms of PCM16
 
+    /// Hang up after this long with neither side speaking (0 = never). "Speaking" means the server transcribed your
+    /// words, or the voice's audio is playing: noise, typing and a fan never count, unlike a mic loudness threshold.
+    /// The `wait` cue plays `silenceWarning` seconds before; a muted call never hangs up on silence.
+    public var hangUpAfterSilence: TimeInterval = 30
     public var onEnd: ((URL?) -> Void)?
     public var onError: ((String) -> Void)?
     public var muted: Bool { meter.withLock { $0.muted } }
@@ -46,7 +49,7 @@ public final class LiveCall: @unchecked Sendable {
     private var lastPing = LiveCall.now
     private var waiter: CheckedContinuation<Void, Error>?
     private var transcript: [[String]] = []
-    private var seconds: Double?, reason: String?, signedOff = false
+    private var seconds: Double?, reason: String?, signedOff = false, warned = false
 
     static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
@@ -136,7 +139,9 @@ public final class LiveCall: @unchecked Sendable {
             watch()
             c.resume()
         case .audio(let pcm): play(pcm)
-        case .inputTranscript(let d): add("user", d)
+        case .inputTranscript(let d):
+            add("user", d)
+            meter.withLock { $0.activeAt = LiveCall.now }  // the server heard words: real speech, not noise
         case .outputTranscript(let d):
             add("assistant", d)
             if !signedOff, transcript.last?[1].contains(LiveCall.signOff) == true {
@@ -181,17 +186,31 @@ public final class LiveCall: @unchecked Sendable {
         c.resume(throwing: LiveCallError(message: message))
     }
 
-    /// Every 100 ms while live: close once the sign-off has played out, or after `idleAfter` with no speech and no audio.
+    /// What the silence guard does after `quiet` seconds with no speech either way: warn once, then hang up.
+    static func silence(quiet: TimeInterval, limit: TimeInterval, warned: Bool) -> (warn: Bool, hangUp: Bool) {
+        guard limit > 0 else { return (false, false) }
+        return (!warned && quiet >= max(0, limit - silenceWarning) && quiet < limit, quiet >= limit)
+    }
+
+    /// Every 100 ms while live: close once the sign-off has played out, or after `hangUpAfterSilence` of silence.
     private func watch() {
         q.asyncAfter(deadline: .now() + 0.1) { [self] in
             guard phase == .live else { return }
-            let m = meter.withLock { $0 }, now = LiveCall.now
+            let now = LiveCall.now
+            let m = meter.withLock { m in
+                if m.muted { m.activeAt = now }  // muting is a deliberate pause: it never counts as silence
+                return m
+            }
             if now - lastPing > 15 {  // URLSessionWebSocketTask has no keepalive: a silently dropped socket shows up here
                 lastPing = now
                 task?.sendPing { [self] error in if let error { q.async { self.socketFailed(error) } } }
             }
+            let quiet = now - max(m.activeAt, m.spkAt, m.queued.isEmpty ? 0 : now)
+            let s = LiveCall.silence(quiet: quiet, limit: hangUpAfterSilence, warned: warned)
+            if quiet < max(0, hangUpAfterSilence - LiveCall.silenceWarning) { warned = false }  // talking again re-arms it
+            if s.warn { warned = true; Cue.wait.play() }
             if signedOff, m.queued.isEmpty, now - m.spkAt > 0.8 { close("sign-off played") }
-            else if now - max(m.activeAt, m.spkAt) > LiveCall.idleAfter { close("idle for \(Int(LiveCall.idleAfter)) s") }
+            else if s.hangUp { close("silent for \(Int(hangUpAfterSilence)) s") }
             else { watch() }
         }
     }
@@ -306,7 +325,6 @@ public final class LiveCall: @unchecked Sendable {
             let level = LiveProtocol.rms(chunk)
             let sending = meter.withLock { m in
                 m.mic = level
-                if level > LiveCall.speechLevel { m.activeAt = LiveCall.now }
                 return m.sending
             }
             if sending { send(LiveProtocol.appendAudio(chunk)) }

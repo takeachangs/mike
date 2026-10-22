@@ -41,6 +41,7 @@ extension Notch {
                 } else {
                     guard let key = Keychain.openAIKey else { throw LaunchError.noKey }
                     let c = LiveCall(apiKey: key, instructions: LiveCall.soloInstructions)
+                    c.hangUpAfterSilence = UserDefaults.standard.object(forKey: "silenceHangUp") as? Double ?? 30
                     c.onEnd = { url in  // the notch model lives as long as the app, so no capture cycle matters here
                         self.call = nil
                         if url != nil { self.say("Call saved to Library", for: 3) }

@@ -160,6 +160,7 @@ struct SettingsView: View {
     @State private var key = Keychain.stored ?? ""
     @State private var keySaved = Keychain.stored != nil
     @AppStorage("soundVolume") private var volume = 0.25
+    @AppStorage("silenceHangUp") private var silence = 30.0
     @State private var loginItem = SMAppService.mainApp.status == .enabled
     @State private var mic = AVCaptureDevice.authorizationStatus(for: .audio)
     @State private var model: String? = Recorder.modelsOnDisk ? "Downloaded" : nil
@@ -197,8 +198,12 @@ struct SettingsView: View {
                         Text("OPENAI_API_KEY from the environment is used first.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Picker("Hang up after silence", selection: $silence) {
+                    Text("Never").tag(0.0); Text("15 seconds").tag(15.0); Text("30 seconds").tag(30.0)
+                    Text("1 minute").tag(60.0); Text("90 seconds").tag(90.0)
+                }
             } header: { Text("Calls") } footer: {
-                Text("Calls use OpenAI's GPT-Live and are billed to this key per second. The key is kept in your Keychain.")
+                Text("Calls use OpenAI's GPT-Live and are billed to this key per second, silence included. The key is kept in your Keychain. Saying goodbye also hangs up; a soft cue plays 10 seconds before a silent call ends.")
             }
             Section("General") {
                 LabeledContent("Sound volume") {
