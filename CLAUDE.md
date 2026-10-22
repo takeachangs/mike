@@ -11,7 +11,7 @@ A voice front end for a coding-agent session. OpenAI GPT-Live (`gpt-live-1`, cli
 ```
 bridge.py                         the whole bridge: Live session, audio, inbox/outbox, state file, notch launch (single file, uv inline deps)
 prompt.txt                        the voice model's instructions, read once at bridge start; personalised for its owner
-notch/Sources/CallNotch/main.swift  the notch indicator (SwiftUI in an NSPanel), one file
+notch/Sources/CallNotch/main.swift  the notch app (SwiftUI in an NSPanel), one file: the session indicator, and when started on its own a resident app with Call / Listen / Library and a Library window of past sessions
 notch/drive.py                    fake bridge: launches the app, cycles states into state.json, answers its mute/hang-up signals; test without a call
 listen/Sources/Listen/main.swift  the /listen recorder: mic -> Parakeet Ultra on the Neural Engine -> per-minute timestamped transcript; drives the notch like the bridge (one file, FluidAudio its only dependency)
 sounds/*.wav, sounds/make.py      the cues both sides play (start, pause, stop, wait, ready) and the script that renders them (needs an earshot install; not a runtime dependency)
@@ -26,10 +26,12 @@ Runtime state lives outside the repo in `~/.claude-call/`: `context.txt` (writte
 ```bash
 uv run bridge.py selftest                      # local checks only, no API call, prints ok
 uv run bridge.py                               # start a real call (bills per second; see Rules)
+uv run bridge.py solo                          # a plain GPT-Live call: no delegation, SOLO_INSTRUCTIONS instead of prompt.txt (also bills)
 uv run bridge.py say  ID "text"                # spoken result for delegation ID
 uv run bridge.py note ID "text"                # quiet progress for delegation ID
 cd notch && swift build -c release             # build the app; needed after any edit under notch/Sources/
 cd notch && python3 drive.py                   # run the app against a fake bridge, no call (Ctrl-C stops both)
+notch/.build/release/CallNotch                 # the resident app: click the notch for Call (bridge.py solo) / Listen / Library; --selftest checks the session parser
 cd listen && swift build -c release            # build the recorder; needed after any edit under listen/Sources/ (first build ~3 min)
 listen/.build/release/Listen out.txt --file x.wav   # play a recording through the recorder in real time, notch included, no mic
 ```
@@ -45,11 +47,12 @@ listen/.build/release/Listen out.txt --file x.wav   # play a recording through t
 
 Changing any of these means changing every side in the same commit.
 
-- **`Hanging up now`**: `SIGN_OFF` in `bridge.py`, the "Ending the call" section of `prompt.txt`, and both skill files. Hearing it in the output transcript closes the session.
+- **`Hanging up now`**: `SIGN_OFF` in `bridge.py`, the "Ending the call" section of `prompt.txt`, `SOLO_INSTRUCTIONS`, and both skill files. Hearing it in the output transcript closes the session.
 - **`Dates you may answer directly`**: the heading `prompt.txt` lets the voice answer from, and the heading the skill writes into `context.txt`.
 - **`Board open:`**: the prefix `prompt.txt` tells the voice to expect on a board result, and the prefix the skill tells the agent to send.
-- **State file**: `{"state": "listening" | "thinking" | "speaking" | "off", "level": 0..1, "muted": bool}`, written atomically (temp file + `os.replace`, or `Data.write(options: .atomic)` in `Listen`) every 50 ms even when unchanged. `Listen` only ever writes `listening` and `off`, with `muted` meaning paused. The app treats a file older than 3 s as a dead bridge and quits, and also quits on `off` or SIGTERM. `thinking` means a delegation has had no `say` yet. `muted` is the server-side mic mute, so the app shows what the bridge actually did.
+- **State file**: `{"state": "listening" | "thinking" | "speaking" | "off", "level": 0..1, "muted": bool, "pid": int, "mode": "call" | "listen"}`, written atomically (temp file + `os.replace`, or `Data.write(options: .atomic)` in `Listen`) every 50 ms even when unchanged. `Listen` only ever writes `listening` and `off`, with `muted` meaning paused. The app treats a file older than 3 s as a dead bridge and quits, and also quits on `off` or SIGTERM. `thinking` means a delegation has had no `say` yet. `muted` is the server-side mic mute, so the app shows what the bridge actually did.
 - **App → bridge signals**: the bridge launches the app with `CALL_BRIDGE_PID` in its environment. The app's mute button sends SIGUSR1 (bridge toggles `session.input_audio.mute`/`unmute`), its hang-up button sends SIGINT (the Ctrl-C path). Without the variable the buttons only print. `Listen` launches the app the same way, plus `CALL_NOTCH_MODE=listen` so the card reads Recording/Paused with pause/play and stop icons, and answers the same signals: SIGUSR1 pauses (audio replaced by silence so the minute stamps stay on the clock), SIGINT stops (on the mic; a `--file` test run has no stop handler, so Ctrl-C just kills it). Without `CALL_NOTCH_MODE` the card looks like a call.
+- **Resident app**: `CallNotch` started without `CALL_BRIDGE_PID` stays at the notch, writes its pid to `~/.claude-call/app.pid` (removed on Quit or SIGTERM; a second copy exits), signals the session named by the state file's `pid` and labels it by `mode`. `bridge.py` and `Listen` launch their own notch only when `app.pid` names no live process. It starts calls as `zsh -lic 'exec uv run bridge.py solo'` and recordings as `Listen ~/.claude-call/listen-<stamp>.txt`, both logging to `~/.claude-call/app.log`.
 - **Cue sounds**: `start` (also resume), `pause`, `stop`, `wait`, `ready` in `sounds/`, played with `afplay -v $CALL_SOUND_VOLUME` (default 0.25, `0` = off) by `bridge.py` (call start, mute/unmute, each delegation, its first `say`, hang-up), `Listen` (start, pause/resume, stop) and the listen skill (`ready` once the notes are written). A renamed file means changing all three; `selftest` checks the files exist.
 - **Inbox and outbox line shapes**, as above. The bridge truncates outbox content at 1500 characters and empties both files at call start, so an agent can count lines from zero.
 - **Audio**: 24 kHz mono int16 PCM both ways.

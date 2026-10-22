@@ -97,7 +97,7 @@ try await live.startStreaming()
 var level = 0.0, muted = false
 let q = DispatchQueue(label: "listen")
 func writeState(_ state: String) {
-    let json = ["state": state, "level": (level * 1000).rounded() / 1000, "muted": muted] as [String: Any]
+    let json = ["state": state, "level": (level * 1000).rounded() / 1000, "muted": muted, "pid": Int(getpid()), "mode": "listen"] as [String: Any]  // pid, mode: for a resident notch app
     try? JSONSerialization.data(withJSONObject: json).write(to: stateURL, options: .atomic)  // the app never reads half a file
 }
 try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
@@ -107,7 +107,9 @@ ticker.schedule(deadline: .now(), repeating: 0.05)
 ticker.setEventHandler { writeState("listening") }  // every tick even when unchanged: a 3 s old file means a dead recorder
 ticker.resume()
 var notch: Process?
-if FileManager.default.isExecutableFile(atPath: notchApp.path) {
+// A resident notch app (CallNotch started on its own, pid in app.pid) shows this recording itself; launch one only without it.
+let resident = (try? String(contentsOf: stateDir.appending(path: "app.pid"), encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+if resident.map({ kill($0, 0) == 0 }) != true, FileManager.default.isExecutableFile(atPath: notchApp.path) {
     let p = Process()
     p.executableURL = notchApp
     p.environment = ProcessInfo.processInfo.environment.merging(["CALL_BRIDGE_PID": "\(getpid())", "CALL_NOTCH_MODE": "listen"]) { $1 }  // its buttons signal us; recorder look
