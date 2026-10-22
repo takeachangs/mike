@@ -4,21 +4,19 @@ import SwiftUI
 let amber = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
 let tabWidth = 42.0, ear = 10.0, overlap = 12.0  // overlap: black drawn under the notch so its rounded corner fills in
 let cardHeight = 116.0
-let rimPad = 3.0  // room below and right of the shapes for the idle ring and the rim's stroke, else the window clips them
+let pad = 4.0  // room below and right of the notch for the hover swell, else the window clips it
 
 /// Where the notch is on the main screen, and the panel frames built around it. Panel coordinates have y down.
 struct NotchGeometry {
-    let notchLeft: Double, notchRight: Double, height: Double, screenTop: Double, hasCutout: Bool
+    let notchLeft: Double, notchRight: Double, height: Double, screenTop: Double
 
     init(screen: NSScreen) {
         if let l = screen.auxiliaryTopLeftArea, let r = screen.auxiliaryTopRightArea, screen.safeAreaInsets.top > 0 {
             (notchLeft, notchRight, height) = (l.maxX, r.minX, screen.safeAreaInsets.top)
-            hasCutout = true
         } else {
             // No cutout: a centred 180-pt notch, as tall as the menu bar.
             // ponytail: 24 pt is the menu bar since Big Sur (NSStatusBar.system.thickness still says 22); measure it if that changes.
             (notchLeft, notchRight, height) = (screen.frame.midX - 90, screen.frame.midX + 90, 24)
-            hasCutout = false
         }
         screenTop = screen.frame.maxY
     }
@@ -27,8 +25,8 @@ struct NotchGeometry {
     var cardRight: Double { ear + 2 * tabWidth + notchWidth }  // the card: tab's left edge to a tab past the notch
     var tabRect: CGRect { CGRect(x: 0, y: 0, width: ear + tabWidth, height: height) }
     var notchRect: CGRect { CGRect(x: ear + tabWidth, y: 0, width: notchWidth, height: height) }
-    var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - ear, y: screenTop - height - rimPad, width: 2 * ear + tabWidth + notchWidth + rimPad, height: height + rimPad) }
-    var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight - rimPad, width: cardRight + ear + rimPad, height: height + cardHeight + rimPad) }
+    var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - ear, y: screenTop - height - pad, width: 2 * ear + tabWidth + notchWidth + pad, height: height + pad) }
+    var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight - pad, width: cardRight + ear + pad, height: height + cardHeight + pad) }
 }
 
 /// Recomputed when displays change (main.swift); read on the main thread only.
