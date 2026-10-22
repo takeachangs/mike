@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The notch's state and drawing. Reads ~/.claude-call/state.json at 20 Hz, whoever wrote it: this app's own call or
 /// recorder, the Listen CLI, or bridge.py.
-@MainActor final class Notch {
+@MainActor final class Notch: ObservableObject {
     let resident: Bool, envPID: pid_t?
     weak var panel: NSPanel?
     var state = "off", target = 0.0, level = 0.0, hangUp = false, muted = false, mutedAt = Date.distantPast
@@ -17,9 +17,14 @@ import SwiftUI
     var peek = Spring(0, response: 0.2)  // resident and idle: the notch swells a little under the pointer
     var width = Spring(0, response: 0.3), radius = Spring(0, response: 0.45), breath = Spring(0, response: 0.5)
     var reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    var open = false, hovered = false, overTab = false, pressed = false, outSince: Date?, closedAt = Date.distantPast
-    // Card height reveal (fluid-interface 0.35 s, no bounce), ears 80 ms, Reduce Motion cross-fade 200 ms, orb hover/press 100 ms.
-    var card = Spring(0, response: 0.35), earFade = Spring(0, response: 0.08), fade = Spring(0, response: 0.2), orb = Spring(1, response: 0.1)
+    var open = false, hovered = false, overTab = false, pressed = false, outSince: Date?
+    // The card morphs out of the notch on two springs, width (cx) and height (cy), 0 = the closed shape, 1 = the card:
+    // opening leads with width (the notch widens, then drops), closing leads with height (it ends as a notch-tall pill
+    // narrowing into the cutout). Responses are set per direction in step(). Reduce Motion cross-fades instead (fade).
+    var cx = Spring(0, response: 0.28), cy = Spring(0, response: 0.40), fade = Spring(0, response: 0.2)
+    var orb = Spring(1, response: 0.1), press = Spring(1, response: 0.1)  // orb hover/press; the notch's press dip
+    /// False when nothing is drawn or moving: the view's timeline pauses, so an idle app costs no frames.
+    @Published var awake = true
 
     init(resident: Bool, envPID: pid_t?, recorderMode: Bool) {
         self.resident = resident; self.envPID = envPID; self.recorderMode = recorderMode
@@ -40,7 +45,29 @@ import SwiftUI
     // ponytail: while open (and ~0.4 s into closing) the panel's transparent corners, e.g. right of the right ear, eat clicks.
     func setOpen(_ o: Bool) {
         open = o; hovered = false; outSince = nil
-        if o { panel?.setFrame(geo.expanded, display: true) } else { closedAt = Date() }
+        if o { panel?.setFrame(geo.expanded, display: true); wake(true) }
+    }
+
+    /// How much of the card is showing: the morph, or the Reduce Motion fade.
+    var shown: Double { reduce ? fade.value : max(cx.value, cy.value) }
+
+    func wake(_ on: Bool) {
+        guard on != awake else { return }
+        awake = on
+        last = nil  // the first frame after waking steps from zero instead of jumping across the pause
+    }
+
+    /// The card at this frame, in panel coordinates: a `hang` whose edges, depth and corners interpolate from the
+    /// closed shape to the card, with the menu-bar ears riding its top corners. Also the clip for the card's content.
+    func cardShape() -> Path {
+        let h = geo.height, notchX = ear + tabWidth, pk = peek.value * press.value
+        let x = reduce ? 1 : min(max(cx.value, 0), 1), y = reduce ? 1 : min(max(cy.value, 0), 1)
+        // Closed: the hover swell over the notch when idle, the tab plus the notch during a session.
+        let l0 = notchX - max(max(width.value, 0), 2 * pk), r0 = notchX + geo.notchWidth + 2 * pk, b0 = h + 4 * pk
+        let l = l0 + (ear - l0) * x, r = r0 + (geo.cardRight - r0) * x, b = b0 + (h + cardHeight - b0) * y
+        var path = hang(l, r, b, 12 + 8 * y)
+        path.addPath(ears(l, r, min(ear, max(ear * pk, r - r0))))  // ears grow as the edges leave the notch
+        return path
     }
 
     /// Like boring.notch: once the pointer has been over the drawn shape or the card, leaving it for 100 ms closes the card.
@@ -52,7 +79,7 @@ import SwiftUI
         if resident { panel.ignoresMouseEvents = !(open || overTab) }  // beside the notch, clicks reach the menu bar
         // ponytail: the 20 Hz sample above can lag a very fast move-and-click onto the notch by up to 50 ms
         guard open else {
-            if card.value < 0.01, panel.frame != geo.collapsed { panel.setFrame(geo.collapsed, display: true) }
+            if shown < 0.02, panel.frame != geo.collapsed { panel.setFrame(geo.collapsed, display: true) }
             return
         }
         if CGRect(x: 0, y: 0, width: geo.collapsed.width, height: geo.height).contains(pt)
@@ -79,9 +106,12 @@ import SwiftUI
         target = min(max(p?.level ?? 0, 0), 1)
         if (p?.muted ?? false) != muted { muted.toggle(); mutedAt = now }
         if notice != nil && now > noticeUntil { notice = nil }
-        if state == "off" && was != "off" && open { setOpen(false) }  // hang-up: the card folds first, the tab follows 60 ms later (step)
+        if state == "off" && was != "off" && open { setOpen(false) }  // hang-up: the card folds onto the tab, then the tab goes (step)
         hover(now)
         reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        func still(_ s: Spring) -> Bool { abs(s.value - s.target) < 0.001 && abs(s.velocity) < 0.01 }
+        wake(state != "off" || open || pressed || overTab || starting != nil
+             || ![cx, cy, fade, peek, width, press, orb].allSatisfy(still))
         if state != "off" || resident { offSince = nil; return }
         offSince = offSince ?? now
         if now.timeIntervalSince(offSince!) > 3 { NSApp.terminate(nil) }
@@ -107,29 +137,28 @@ import SwiftUI
         last = now; t += dt
         spin += dt / (reduce ? 4 : 1.4)
         let thinking = state == "thinking"
-        width.target = state == "off" && now.timeIntervalSince(closedAt) >= 0.06 ? 0 : tabWidth
+        width.target = state == "off" && !open && cy.value < 0.2 ? 0 : tabWidth  // the tab leaves once the card has landed on it
         width.response = reduce ? 0.15 : state == "off" ? 0.24 : 0.3  // exits faster than it enters
         radius.response = reduce ? 0.25 : thinking ? 0.45 : 0.5
         radius.target = thinking ? 9 : 0
         breath.target = state == "listening" && !reduce ? 1 : 0
-        card.target = open ? 1 : 0; earFade.target = card.target; fade.target = card.target
+        cx.target = open ? 1 : 0; cy.target = cx.target; fade.target = cx.target
+        cx.response = open ? 0.28 : 0.34; cy.response = open ? 0.40 : 0.26  // see cx/cy; retargeting keeps velocity
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
+        press.target = pressed ? 0.6 : 1
         peek.target = state == "off" && overTab && !open && !reduce ? 1 : 0
-        width.step(dt); radius.step(dt); breath.step(dt); card.step(dt); earFade.step(dt); fade.step(dt); orb.step(dt); peek.step(dt)
+        width.step(dt); radius.step(dt); breath.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); peek.step(dt); press.step(dt)
         let goal = thinking || state == "off" ? 0 : target
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }
 
     func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
-        // Card: revealed downward, never scaled, so its corners stay 20 pt. Reduce Motion: full height, cross-faded.
-        let a = reduce ? fade.value : 1, g = reduce ? 1 : card.value
-        if a > 0.005 && g > 0.005 {
-            ctx.fill(hang(ear, geo.cardRight, (geo.height + cardHeight) * g, 20), with: .color(.black.opacity(a)))
-            ctx.fill(ears(ear, geo.cardRight, ear), with: .color(.black.opacity(a * earFade.value)))
-        }
+        // Card: the notch itself growing into it (cardShape), never scaled, so its corners stay round. Reduce Motion:
+        // the full card cross-fades. Closing, the tail of the springs settles inside the hardware cutout, out of sight.
+        if shown > 0.002 { ctx.fill(cardShape(), with: .color(.black.opacity(reduce ? fade.value : 1))) }
         let h = geo.height, notchX = ear + tabWidth, w = max(width.value, 0)
         if w <= 0.1 && peek.value > 0.01 {  // idle hover: 2 pt wider each side and 4 pt deeper than the cutout
-            let k = peek.value * (pressed ? 0.6 : 1)
+            let k = peek.value * press.value
             ctx.fill(hang(notchX - 2 * k, notchX + geo.notchWidth + 2 * k, h + 4 * k, 12), with: .color(.black))
             ctx.fill(ears(notchX - 2 * k, notchX + geo.notchWidth + 2 * k, ear), with: .color(.black))
         }

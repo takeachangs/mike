@@ -2,18 +2,21 @@ import AppKit
 import SwiftUI
 
 struct NotchView: View {
-    let m: Notch
+    @ObservedObject var m: Notch
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 60)) { tl in
-            Canvas { ctx, size in
-                m.step(tl.date)
-                m.draw(&ctx, size)
-            }
+        // Full display rate while anything moves (120 Hz on ProMotion); paused when idle (Notch.awake).
+        TimelineView(.animation(minimumInterval: nil, paused: !m.awake)) { tl in
+            let _ = m.step(tl.date)  // once per frame, before both the shape and the content's clip read the springs
+            Canvas { ctx, size in m.draw(&ctx, size) }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)  // the orb shrinks on pointer-down; release over the tab toggles the card
                 .onChanged { g in m.pressed = m.clickable(g.startLocation) }
                 .onEnded { g in if m.pressed && m.clickable(g.location) { m.setOpen(!m.open) }; m.pressed = false })
-            .overlay(alignment: .topLeading) { card(tl.date) }  // overlay: never resizes the root
+            .overlay(alignment: .topLeading) {  // overlay: never resizes the root
+                card(tl.date)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .clipShape(m.cardShape())  // content never shows outside the black, mid-morph included
+            }
         }
     }
 
@@ -24,18 +27,18 @@ struct NotchView: View {
     /// Resident and idle: what the app can start.
     func actions() -> some View {
         VStack(spacing: 10) {
-            reveal(label(m.notice ?? "CallNotch", alert: m.notice != nil), after: 0.11)
+            reveal(label(m.notice ?? "CallNotch", alert: m.notice != nil), after: 0.08)
             reveal(HStack(spacing: 14) {
                 action("phone.fill", "Call", fill: Color(red: 0.19, green: 0.78, blue: 0.35), lit: Color(red: 0.3, green: 0.85, blue: 0.45)) { m.launch(listen: false) }
                 action("waveform", "Listen") { m.launch(listen: true) }
                 action("rectangle.stack.fill", "Library") { m.setOpen(false); Windows.library() }
                 action("gearshape.fill", "Settings") { m.setOpen(false); Windows.settings() }
                 action("power", "Quit") { quitApp() }
-            }, after: 0.15)
+            }, after: 0.12)
         }
         .foregroundStyle(.white)
         .frame(width: geo.cardRight - ear, height: cardHeight)
-        .allowsHitTesting(m.open)
+        .allowsHitTesting(m.open && (m.reduce || m.cy.value > 0.8))  // not before it can be seen
         .offset(x: ear, y: geo.height)
     }
 
@@ -57,27 +60,29 @@ struct NotchView: View {
         let status = m.notice ?? (m.starting != nil ? (recorder ? m.progress.map { "Loading speech model \(Int($0 * 100))%" } ?? "Loading speech model" : "Connecting")
             : recorder ? (m.muted ? "Paused" : "Recording") : m.muted ? "Muted" : m.state.capitalized)
         return VStack(spacing: 10) {
-            reveal(label(status, alert: m.notice != nil), after: 0.11)
+            reveal(label(status, alert: m.notice != nil), after: 0.08)
             reveal(Text(s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%02d:%02d", s / 60, s % 60)).font(.system(size: 26, weight: .medium)).monospacedDigit()
-                .tracking(-0.26).frame(height: 26), after: 0.11)
+                .tracking(-0.26).frame(height: 26), after: 0.08)
             reveal(HStack(spacing: 16) {
                 mute(now)
                 Button { m.signalSession(SIGINT); m.setOpen(false) } label: { Image(systemName: recorder ? "stop.fill" : "phone.down.fill") }
                     .buttonStyle(Round(fill: Color(red: 1, green: 0x3B / 255, blue: 0x30 / 255), lit: Color(red: 1, green: 0x55 / 255, blue: 0x4A / 255)))
                     .accessibilityLabel(recorder ? "Stop" : "Hang up")
-            }.padding(.top, 4), after: 0.15)
+            }.padding(.top, 4), after: 0.12)
         }
         .foregroundStyle(.white)
         .frame(width: geo.cardRight - ear, height: cardHeight)
-        .allowsHitTesting(m.open)
+        .allowsHitTesting(m.open && (m.reduce || m.cy.value > 0.8))  // not before it can be seen
         .offset(x: ear, y: geo.height)
     }
 
-    /// In: fade 160 ms and settle 6 pt down with a strong ease-out, after `delay`. Out: 120 ms at once. Reduce Motion: fade only.
+    /// In: fade 180 ms and settle 6 pt down with a strong ease-out, after `delay`; the growing edge wipes it in (the clip).
+    /// Out: 90 ms at once, faster than in; the rising edge swallows the rest. Reopening a mostly open card skips the delay.
+    /// Reduce Motion: fade only.
     func reveal(_ v: some View, after delay: Double) -> some View {
-        let o = m.open, r = m.reduce
-        let fade: Animation = r ? .timingCurve(0.25, 0.1, 0.25, 1, duration: 0.2) : o ? .easeOut(duration: 0.16).delay(delay) : .easeOut(duration: 0.12)
-        let settle: Animation = o ? .timingCurve(0.23, 1, 0.32, 1, duration: 0.24).delay(delay) : .easeOut(duration: 0.12)
+        let o = m.open, r = m.reduce, d = delay * (1 - min(max(m.cy.value, 0), 1))
+        let fade: Animation = r ? .timingCurve(0.25, 0.1, 0.25, 1, duration: 0.2) : o ? .easeOut(duration: 0.18).delay(d) : .easeOut(duration: 0.09)
+        let settle: Animation = o ? .timingCurve(0.23, 1, 0.32, 1, duration: 0.24).delay(d) : .easeOut(duration: 0.09)
         return v.animation(fade) { $0.opacity(o ? 1 : 0) }.animation(settle) { $0.offset(y: o || r ? 0 : -6) }
     }
 
