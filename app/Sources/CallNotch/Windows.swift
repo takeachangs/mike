@@ -10,7 +10,10 @@ import UniformTypeIdentifiers
     private static var open: [String: NSWindow] = [:]
 
     static func library() { show("library", "Library", CGSize(width: 900, height: 600), Library()) }
-    static func settings(welcome: Bool = false) { show("settings", welcome ? "Welcome to CallNotch" : "Settings", CGSize(width: 520, height: 560), SettingsView(welcome: welcome)) }
+    static func settings(welcome: Bool = false) {
+        if welcome { show("welcome", "Welcome to CallNotch", CGSize(width: 520, height: 600), SettingsView(welcome: true)) }
+        else { show("settings", "Settings", CGSize(width: 520, height: 560), SettingsView(welcome: false)) }
+    }
 
     private static func show(_ id: String, _ title: String, _ size: CGSize, _ view: some View) {
         let w = open[id] ?? {

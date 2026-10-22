@@ -15,8 +15,19 @@ public enum Paths {
         return f
     }()
 
-    public static func newRecording(at date: Date = Date()) -> URL { stateDir.appending(path: "listen-\(stamp.string(from: date)).txt") }
-    public static func newCallTranscript(at date: Date = Date()) -> URL { stateDir.appending(path: "transcript-\(stamp.string(from: date)).json") }
+    public static func newRecording(at date: Date = Date(), in dir: URL = stateDir) -> URL { unused("listen", "txt", date, dir) }
+    public static func newCallTranscript(at date: Date = Date(), in dir: URL = stateDir) -> URL { unused("transcript", "json", date, dir) }
+
+    /// `<prefix>-<stamp>.<ext>`, moved a minute later while that name is taken, so two sessions started in the same
+    /// minute never share (and wipe) one file, and the name keeps the minute stamp the Library and the skills read.
+    static func unused(_ prefix: String, _ ext: String, _ date: Date, _ dir: URL) -> URL {
+        var d = date
+        while true {
+            let url = dir.appending(path: "\(prefix)-\(stamp.string(from: d)).\(ext)")
+            if !FileManager.default.fileExists(atPath: url.path) { return url }
+            d.addTimeInterval(60)
+        }
+    }
 
     public static func ensureStateDir() throws { try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true) }
 }

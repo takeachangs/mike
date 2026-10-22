@@ -56,7 +56,7 @@ If the tool cannot wait on a file, poll instead: after step 2, loop on `tail -n 
 CallNotch.app (built and installed by SETUP.md step 2) is the notch. If it is already running on its own, it shows the call; otherwise the bridge starts it for the length of the call. After pulling changes, rebuild and reinstall:
 
 ```bash
-cd ~/projects/call-notch/app && scripts/build-app.sh && cp -R dist/CallNotch.app /Applications/
+cd ~/projects/call-notch/app && scripts/build-app.sh && scripts/install.sh
 ```
 
 To try it without a call: `python3 ~/projects/call-notch/app/scripts/drive.py` (after `swift build -c release` in `app/`), which launches the notch against a fake bridge.

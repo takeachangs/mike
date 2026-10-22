@@ -24,8 +24,7 @@ Requires macOS 14 or later on Apple Silicon.
 
 ```bash
 cd app && scripts/build-app.sh          # builds and signs dist/CallNotch.app (ad-hoc unless SIGN_IDENTITY is set)
-cp -R dist/CallNotch.app /Applications/
-open /Applications/CallNotch.app
+scripts/install.sh --open               # quits a running copy, replaces /Applications/CallNotch.app, opens it
 ```
 
 The first launch shows a short setup window: allow the microphone,
@@ -65,7 +64,7 @@ python3 scripts/drive.py                # cycle the notch through call states wi
 
 Releases: `SIGN_IDENTITY="Developer ID Application: …" NOTARY_PROFILE=<profile> scripts/build-app.sh`
 signs with the hardened runtime, notarizes and staples. CI (`.github/workflows/ci.yml`) runs the tests and
-builds the app on every push; pushing a `v*` tag attaches the zip to a GitHub release.
+builds the app on pull requests and pushes to main; pushing a `v*` tag attaches the zip to a GitHub release.
 
 ## Agent mode
 

@@ -47,6 +47,15 @@ import Testing
         #expect(Session.parse(write("inbox.jsonl", "")) == nil)
     }
 
+    @Test func newFileNamesNeverCollide() throws {
+        let noon = try #require(Paths.stamp.date(from: "20261022T1200"))
+        let first = Paths.newRecording(at: noon, in: dir)
+        #expect(first.lastPathComponent == "listen-20261022T1200.txt")
+        try "".write(to: first, atomically: true, encoding: .utf8)
+        #expect(Paths.newRecording(at: noon, in: dir).lastPathComponent == "listen-20261022T1201.txt")
+        #expect(Paths.newCallTranscript(at: noon, in: dir).lastPathComponent == "transcript-20261022T1200.json")
+    }
+
     @Test func loadSortsNewestFirst() {
         _ = write("transcript-20261001T1000.json", "[]")
         _ = write("listen-20261002T1000.txt", "10:00 a")

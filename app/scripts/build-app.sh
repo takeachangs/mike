@@ -24,11 +24,11 @@ cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" Resources/Info.plist > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-# Inside out: the helper and the resource bundle first, the app last. The hardened runtime (--options runtime) is
-# what notarization requires; ad-hoc signatures skip it so the app still runs locally without a Developer ID.
+# Inside out: the Listen helper first, then the app, whose signature seals everything in Contents/Resources (the
+# resource bundle is data, not code, and older SwiftPM builds it flat, which codesign rejects as a bundle). The hardened
+# runtime (--options runtime) is what notarization requires; ad-hoc signatures skip it so the app runs locally.
 RUNTIME=(); [ "$IDENTITY" != "-" ] && RUNTIME=(--options runtime --timestamp)
 codesign --force --sign "$IDENTITY" ${RUNTIME[@]+"${RUNTIME[@]}"} --entitlements Resources/CallNotch.entitlements "$APP/Contents/MacOS/Listen"
-codesign --force --sign "$IDENTITY" ${RUNTIME[@]+"${RUNTIME[@]}"} "$APP/Contents/Resources/CallNotch_CallNotchKit.bundle"
 codesign --force --sign "$IDENTITY" ${RUNTIME[@]+"${RUNTIME[@]}"} --entitlements Resources/CallNotch.entitlements "$APP"
 codesign --verify --strict --deep "$APP"
 

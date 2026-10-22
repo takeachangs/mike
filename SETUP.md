@@ -40,7 +40,7 @@ Swift build directory churns and would upload on every compile.
 ## 2. Build and install the app
 
 ```bash
-cd ~/projects/call-notch/app && scripts/build-app.sh && cp -R dist/CallNotch.app /Applications/
+cd ~/projects/call-notch/app && scripts/build-app.sh && scripts/install.sh
 ```
 
 The first build fetches FluidAudio and takes a few minutes. Expect

@@ -4,12 +4,13 @@ import FluidAudio
 import Foundation
 
 public enum RecorderError: LocalizedError {
-    case cannotWrite(URL, String), micDenied
+    case cannotWrite(URL, String), micDenied, noMicrophone
 
     public var errorDescription: String? {
         switch self {
         case .cannotWrite(let url, let why): "Cannot write \(url.path): \(why)"
         case .micDenied: "Microphone access is off. Turn it on in System Settings > Privacy & Security > Microphone."
+        case .noMicrophone: "No microphone is available."
         }
     }
 }
@@ -26,14 +27,28 @@ extension SlidingWindowAsrManager {
 public final class Recorder: @unchecked Sendable {
     public enum Source: Sendable { case microphone, file(URL) }
 
-    nonisolated(unsafe) private static var cached: AsrModels?
+    @MainActor private static var loading: Task<AsrModels, Error>?
+    @MainActor private static var listeners: [ProgressHandler] = []
 
-    /// Parakeet Ultra: downloaded (~600 MB) and compiled on first use, then loaded from FluidAudio's cache.
-    public static func models(progress: ProgressHandler? = nil) async throws -> AsrModels {
-        if let cached { return cached }
-        let m = try await AsrModels.downloadAndLoad(version: .ultra, progressHandler: progress)
-        cached = m
-        return m
+    /// Parakeet Ultra: downloaded (~600 MB) and compiled on first use, then loaded from FluidAudio's cache. Callers
+    /// share one load, so Settings' "Download now" and a recording never fetch it twice; a failed load can be retried.
+    @MainActor public static func models(progress: ProgressHandler? = nil) async throws -> AsrModels {
+        if let progress { listeners.append(progress) }
+        let task = loading ?? Task {
+            try await AsrModels.downloadAndLoad(version: .ultra) { p in
+                Task { @MainActor in Recorder.listeners.forEach { $0(p) } }
+            }
+        }
+        loading = task
+        do {
+            let m = try await task.value
+            listeners.removeAll()
+            return m
+        } catch {
+            loading = nil
+            listeners.removeAll()
+            throw error
+        }
     }
 
     public static var micDenied: Bool { [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .audio)) }
@@ -42,6 +57,8 @@ public final class Recorder: @unchecked Sendable {
     public private(set) var paused = false
     /// Each decoded window's text, and the minute label when it opens a new paragraph. Called off the main thread.
     public var onText: ((_ text: String, _ newMinute: String?) -> Void)?
+    /// Problems after start (a device switch the engine could not follow). Called off the main thread.
+    public var onError: ((String) -> Void)?
 
     private var level = 0.0, stopped = false
     private let live = SlidingWindowAsrManager(config: .streaming)
@@ -81,11 +98,16 @@ public final class Recorder: @unchecked Sendable {
         let (audio, cont) = AsyncStream<AVAudioPCMBuffer>.makeStream()
         feed = cont
         pump = Task { [live] in for await b in audio { await live.streamAudio(b) } }  // one stream keeps buffers in order
-        Cue.start.play()
-        switch source {
-        case .microphone: try startMicrophone()
-        case .file(let url): fileTask = Task { [self] in play(url) }
+        do {
+            switch source {
+            case .microphone: try startMicrophone()
+            case .file(let url): fileTask = Task { [self] in play(url) }
+            }
+        } catch {
+            _ = try? await stop()  // ends the ticker (state off), the pump and the display task, so nothing is left running
+            throw error
         }
+        Cue.start.play()
         Log.recorder.info("recording to \(self.output.path, privacy: .public)")
     }
 
@@ -132,6 +154,8 @@ public final class Recorder: @unchecked Sendable {
 
     private func startMicrophone() throws {
         let engine = AVAudioEngine()
+        let format = engine.inputNode.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else { throw RecorderError.noMicrophone }  // installTap would raise
         engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buf, _ in self?.take(buf) }
         try engine.start()
         // A new default input (AirPods connecting) stops the engine and changes the format: tap again and restart.
@@ -139,8 +163,13 @@ public final class Recorder: @unchecked Sendable {
         reconfig = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
             engine.inputNode.removeTap(onBus: 0)
             engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buf, _ in self?.take(buf) }
-            try? engine.start()
-            Log.recorder.info("input device changed, listening on the new one")
+            do {
+                try engine.start()
+                Log.recorder.info("input device changed, listening on the new one")
+            } catch {
+                Log.recorder.error("could not restart on the new input: \(error.localizedDescription, privacy: .public)")
+                self?.onError?("The microphone changed and recording could not continue. Stop and start again.")
+            }
         }
         self.engine = engine
     }

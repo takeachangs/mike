@@ -13,6 +13,7 @@ import SwiftUI
     var starting: Date?, progress: Double?  // a session this app is starting: model download / load, or connecting
     var notice: String?, noticeUntil = Date.distantPast
     var recorder: Recorder?, call: LiveCall?  // sessions running inside this app
+    var launching = false, cancelled = false, stopping = false  // their lifecycle, see Launch.swift
     var peek = Spring(0, response: 0.2)  // resident and idle: the notch swells a little under the pointer
     var width = Spring(0, response: 0.3), radius = Spring(0, response: 0.45), breath = Spring(0, response: 0.5)
     var reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -71,7 +72,8 @@ import SwiftUI
         let was = state
         state = hangUp ? "off" : p?.isLive == true ? p!.state : waiting ? "thinking" : "off"
         if was == "off" && state != "off" { since = now }
-        if let p, p.isLive { pid = p.pid; recorderMode = p.mode == .listen || ProcessInfo.processInfo.environment["CALL_NOTCH_MODE"] == "listen" }
+        pid = p?.isLive == true ? p?.pid : nil  // never keep a finished session's pid: it may be reused by then
+        if let p, p.isLive { recorderMode = p.mode == .listen || ProcessInfo.processInfo.environment["CALL_NOTCH_MODE"] == "listen" }
         target = min(max(p?.level ?? 0, 0), 1)
         if (p?.muted ?? false) != muted { muted.toggle(); mutedAt = now }
         if notice != nil && now > noticeUntil { notice = nil }
@@ -86,7 +88,11 @@ import SwiftUI
     /// The card's pause and stop buttons: sessions inside this app directly, others by signal (SIGUSR1 pause or mute,
     /// SIGINT stop or hang up), the same signals Ctrl-C and bridge.py use.
     func signalSession(_ sig: Int32) {
-        guard let target = envPID ?? pid else { Log.app.error("no session pid to signal"); return }
+        if resident && launching {  // still starting: Stop cancels it, there is nothing to pause yet
+            if sig == SIGINT { stopLocal() }
+            return
+        }
+        guard let target = envPID ?? pid, target > 0 else { Log.app.error("no session pid to signal"); return }
         if target == getpid() {
             if sig == SIGUSR1 { recorder?.togglePause(); call?.toggleMute() } else { stopLocal() }
         } else {

@@ -5,7 +5,7 @@
 """Voice bridge: GPT-Live on the mic/speaker, Claude Code as the backend.
 
   uv run bridge.py                 start a call (Ctrl-C hangs up)
-  uv run bridge.py solo            a plain GPT-Live call: no delegation, no agent (the menu bar app's call)
+  uv run bridge.py solo            a plain GPT-Live call: no delegation, no agent (the app's Call does the same in Swift)
   uv run bridge.py say  ID "text"  spoken result for delegation ID
   uv run bridge.py note ID "text"  quiet progress for delegation ID
   uv run bridge.py selftest
@@ -16,12 +16,12 @@ A final {"event": "closed", "seconds": ..., "transcript": [...]} line ends the
 call; `seconds` is the API's final billed audio duration (null if the close was
 never confirmed). Replies go through the outbox (written by `say` / `note`) and
 are forwarded to the Live session. During a call ~/.claude-call/state.json
-carries {"state", "level", "muted"} at 20 Hz for the notch app (notch/), which
+carries {"state", "level", "muted", "pid", "mode"} at 20 Hz for the notch (CallNotch.app), which
 is launched here if it has been built; its buttons signal this process
 (SIGUSR1 toggles mute, SIGINT hangs up). ~/.claude-call/context.txt, if present,
 seeds the session as a developer message. The call closes itself after
 IDLE_AFTER seconds with no speech, no audio out and no delegation pending.
-Short cues from sounds/ play quietly at call start, mute and unmute, each
+Short cues (the app's cue files, SOUNDS) play quietly at call start, mute and unmute, each
 delegation, its first answer and hang-up; CALL_SOUND_VOLUME (afplay -v,
 default 0.25) sets the level and 0 turns them off.
 """
@@ -71,7 +71,7 @@ def append_outbox(kind: str, delegation_id: str, content: str) -> None:
 
 
 def cue(name: str) -> None:
-    """Play sounds/<name>.wav without waiting. A missing file or player is skipped: a cue never breaks the call."""
+    """Play SOUNDS/<name>.wav without waiting. A missing file or player is skipped: a cue never breaks the call."""
     if VOLUME > 0 and (f := SOUNDS / f"{name}.wav").exists():
         try:
             subprocess.Popen(["afplay", "-v", str(VOLUME), str(f)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -12,7 +12,7 @@ The recorder is the `Listen` command inside CallNotch.app (built from `~/project
 1. Make sure CallNotch.app is installed (`ls /Applications/CallNotch.app/Contents/MacOS/Listen`). If not, build and install it once, and again after pulling changes:
 
    ```bash
-   cd ~/projects/call-notch/app && scripts/build-app.sh && cp -R dist/CallNotch.app /Applications/
+   cd ~/projects/call-notch/app && scripts/build-app.sh && scripts/install.sh
    ```
 
    The first run downloads the model (about 600 MB) and takes a minute or two to load.
@@ -43,7 +43,7 @@ The recorder is the `Listen` command inside CallNotch.app (built from `~/project
 5. Play the ready cue so the person knows the notes are there, then tell them, in a few lines: how long it ran, the to-dos, and the paths of both files.
 
    ```bash
-   afplay -v "${CALL_SOUND_VOLUME:-0.25}" /Applications/CallNotch.app/Contents/Resources/CallNotch_CallNotchKit.bundle/Contents/Resources/sounds/ready.wav
+   /Applications/CallNotch.app/Contents/MacOS/Listen --cue ready
    ```
 
 ## Notes

@@ -43,6 +43,7 @@ public final class LiveCall: @unchecked Sendable {
     private var observers: [NSObjectProtocol] = []
     // on q
     private var phase = Phase.idle
+    private var lastPing = LiveCall.now
     private var waiter: CheckedContinuation<Void, Error>?
     private var transcript: [[String]] = []
     private var seconds: Double?, reason: String?, signedOff = false
@@ -98,6 +99,7 @@ public final class LiveCall: @unchecked Sendable {
         guard let task else { throw LiveCallError(message: "bad endpoint URL") }
         try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
             q.async { [self] in
+                guard phase == .idle else { c.resume(throwing: LiveCallError(message: "Hung up before the call started")); return }
                 phase = .connecting
                 waiter = c
                 task.resume()
@@ -184,6 +186,10 @@ public final class LiveCall: @unchecked Sendable {
         q.asyncAfter(deadline: .now() + 0.1) { [self] in
             guard phase == .live else { return }
             let m = meter.withLock { $0 }, now = LiveCall.now
+            if now - lastPing > 15 {  // URLSessionWebSocketTask has no keepalive: a silently dropped socket shows up here
+                lastPing = now
+                task?.sendPing { [self] error in if let error { q.async { self.socketFailed(error) } } }
+            }
             if signedOff, m.queued.isEmpty, now - m.spkAt > 0.8 { close("sign-off played") }
             else if now - max(m.activeAt, m.spkAt) > LiveCall.idleAfter { close("idle for \(Int(LiveCall.idleAfter)) s") }
             else { watch() }
@@ -192,6 +198,7 @@ public final class LiveCall: @unchecked Sendable {
 
     /// session.close, then up to `closeWait` for session.closed and its final usage.
     private func close(_ why: String) {
+        if phase == .idle { phase = .done; return }  // hung up while the audio was still starting: connect() will refuse
         if phase == .connecting { failStart("Hung up before the call started"); return }
         guard phase == .live else { return }
         phase = .closing

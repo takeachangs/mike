@@ -3,6 +3,8 @@
 //   Settings / Quit. Calls (GPT-Live) and recordings (Parakeet Ultra, on-device) run inside the app, and it shows any
 //   other session too (a skill's /call or /listen) from ~/.claude-call/state.json. Its pid goes in app.pid so those
 //   sessions do not start a second notch.
+//   `open -a CallNotch --args --listen` starts a recording right away; `--test-audio <file>` records a file played in
+//   real time instead of the mic (for testing without speaking).
 // - Launched by a session with CALL_BRIDGE_PID (bridge.py, the Listen CLI, notch/drive.py) it is only that session's
 //   indicator and quits when the session ends. CALL_NOTCH_MODE=listen labels it as a recorder.
 import AppKit
@@ -57,23 +59,39 @@ NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenPar
 if resident {
     try? Paths.ensureStateDir()
     try? "\(getpid())".write(to: Paths.appPID, atomically: true, encoding: .utf8)
-    if !UserDefaults.standard.bool(forKey: "onboarded") { MainActor.assumeIsolated { Windows.settings(welcome: true) } }
+    let args = CommandLine.arguments
+    let testAudio = args.firstIndex(of: "--test-audio").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
+    MainActor.assumeIsolated {
+        if args.contains("--listen") { model.launch(listen: true, testAudio: testAudio) }
+        else if !UserDefaults.standard.bool(forKey: "onboarded") { Windows.settings(welcome: true) }
+    }
 }
 
-/// Leave the notch: end this app's own session first (so its transcript is saved), fold the card and tab, exit.
-/// A resident app also gives up app.pid.
-@MainActor func quitApp() {
-    model.stopLocal()
-    model.hangUp = true; model.poll()
-    if resident { try? FileManager.default.removeItem(at: Paths.appPID) }
-    let wait = model.recorder != nil || model.call != nil ? 6.0 : 0.5  // ponytail: a fixed wait for the final save, not a join
-    DispatchQueue.main.asyncAfter(deadline: .now() + wait) { exit(0) }
+/// Every way out goes through NSApp.terminate: the card's Quit, SIGTERM (bridge.py on hang-up, install.sh), logout,
+/// Activity Monitor. Termination waits until this app's own session has stopped and saved, then folds the notch.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            if resident { try? FileManager.default.removeItem(at: Paths.appPID) }
+            model.hangUp = true; model.poll()
+            guard model.busy else { return .terminateNow }  // nothing of ours to save
+            Task { @MainActor in
+                await model.stopAndWait()
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
+    }
 }
+let delegate = AppDelegate()  // NSApplication holds its delegate weakly
+app.delegate = delegate
 
-// bridge.py sends SIGTERM on hang-up (when it launched us); logout sends it to a resident app. Same exit either way.
+@MainActor func quitApp() { NSApp.terminate(nil) }
+
 signal(SIGTERM, SIG_IGN)
 let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-term.setEventHandler { MainActor.assumeIsolated { quitApp() } }
+// Not terminate() inside the handler: it runs as a main-queue block, and .terminateLater's wait needs that queue free.
+term.setEventHandler { RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { quitApp() } } }
 term.resume()
 
 app.run()
