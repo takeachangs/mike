@@ -7,15 +7,17 @@ let cardHeight = 116.0
 
 /// Where the notch is on the main screen, and the panel frames built around it. Panel coordinates have y down.
 struct NotchGeometry {
-    let notchLeft: Double, notchRight: Double, height: Double, screenTop: Double
+    let notchLeft: Double, notchRight: Double, height: Double, screenTop: Double, hasCutout: Bool
 
     init(screen: NSScreen) {
         if let l = screen.auxiliaryTopLeftArea, let r = screen.auxiliaryTopRightArea, screen.safeAreaInsets.top > 0 {
             (notchLeft, notchRight, height) = (l.maxX, r.minX, screen.safeAreaInsets.top)
+            hasCutout = true
         } else {
             // No cutout: a centred 180-pt notch, as tall as the menu bar.
             // ponytail: 24 pt is the menu bar since Big Sur (NSStatusBar.system.thickness still says 22); measure it if that changes.
             (notchLeft, notchRight, height) = (screen.frame.midX - 90, screen.frame.midX + 90, 24)
+            hasCutout = false
         }
         screenTop = screen.frame.maxY
     }

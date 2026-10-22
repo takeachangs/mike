@@ -152,33 +152,53 @@ import SwiftUI
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }
 
+    /// The rim: a thin light line along the edge of whatever is drawn, so you can see the app is at the notch. It
+    /// fades to nothing toward the top of the screen, thinning out along the ears where the shape meets the bezel.
+    static let rimOpacity = 0.5, rimWidth = 1.25, ring = 1.5  // ring: black just outside the idle cutout, to carry the rim
+
     func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
+        let h = geo.height, notchX = ear + tabWidth, w = max(width.value, 0), pk = peek.value * press.value
+        var outline = Path()
         // Card: the notch itself growing into it (cardShape), never scaled, so its corners stay round. Reduce Motion:
         // the full card cross-fades. Closing, the tail of the springs settles inside the hardware cutout, out of sight.
-        if shown > 0.002 { ctx.fill(cardShape(), with: .color(.black.opacity(reduce ? fade.value : 1))) }
-        let h = geo.height, notchX = ear + tabWidth, w = max(width.value, 0)
-        if w <= 0.1 && peek.value > 0.01 {  // idle hover: 2 pt wider each side and 4 pt deeper than the cutout
-            let k = peek.value * press.value
-            ctx.fill(hang(notchX - 2 * k, notchX + geo.notchWidth + 2 * k, h + 4 * k, 12), with: .color(.black))
-            ctx.fill(ears(notchX - 2 * k, notchX + geo.notchWidth + 2 * k, ear), with: .color(.black))
+        if shown > 0.002 {
+            let card = cardShape()
+            ctx.fill(card, with: .color(.black.opacity(reduce ? fade.value : 1)))
+            outline = card
+        }
+        // Idle (resident, on a real notch): the cutout plus a thin black ring, swelling 2 pt a side and 4 pt down under
+        // the pointer. On a screen without a cutout nothing is drawn at idle, so no fake notch covers the menu bar.
+        if w <= 0.1 && (geo.hasCutout && resident || peek.value > 0.01) {
+            let g = geo.hasCutout ? Notch.ring : 0, l = notchX - 2 * pk - g, r = notchX + geo.notchWidth + 2 * pk + g
+            var idle = hang(l, r, h + 4 * pk + g, 12 + g)
+            idle.addPath(ears(l, r, ear))
+            ctx.fill(idle, with: .color(.black))
+            outline = outline.isEmpty ? idle : outline.union(idle)
+        }
+        var tab = Path()
+        if w > 0.1 {
+            let e = min(ear, w), left = notchX - w, r = min(12, w, h / 2)
+            tab.move(to: CGPoint(x: left - e, y: 0))
+            tab.addCurve(to: CGPoint(x: left, y: e), control1: CGPoint(x: left - e + 0.552 * e, y: 0), control2: CGPoint(x: left, y: e - 0.552 * e))
+            tab.addLine(to: CGPoint(x: left, y: h - r))
+            tab.addArc(tangent1End: CGPoint(x: left, y: h), tangent2End: CGPoint(x: left + r, y: h), radius: r)
+            tab.addLine(to: CGPoint(x: notchX + min(overlap, w), y: h))
+            tab.addLine(to: CGPoint(x: notchX + min(overlap, w), y: 0))
+            tab.closeSubpath()
+            // The notch body and its ears grow from the top with the tab: under a hardware cutout nobody sees the
+            // body, on a screen without one it is the notch.
+            let n = min(w / tabWidth, 1)
+            var shape = tab
+            shape.addPath(hang(notchX, notchX + geo.notchWidth, h * n, 12))
+            shape.addPath(ears(notchX, notchX + geo.notchWidth, ear * n))
+            ctx.fill(shape, with: .color(.black))
+            outline = outline.isEmpty ? shape : outline.union(shape)
+        }
+        if !outline.isEmpty {  // one outline of everything drawn (the union), so no seams show inside the black
+            let rim = Gradient(stops: [.init(color: .white.opacity(0), location: 0), .init(color: .white.opacity(Notch.rimOpacity), location: 1)])
+            ctx.stroke(outline, with: .linearGradient(rim, startPoint: .zero, endPoint: CGPoint(x: 0, y: h)), lineWidth: Notch.rimWidth)
         }
         guard w > 0.1 else { return }
-        let e = min(ear, w), left = notchX - w, r = min(12, w, h / 2)
-        var tab = Path()
-        tab.move(to: CGPoint(x: left - e, y: 0))
-        tab.addCurve(to: CGPoint(x: left, y: e), control1: CGPoint(x: left - e + 0.552 * e, y: 0), control2: CGPoint(x: left, y: e - 0.552 * e))
-        tab.addLine(to: CGPoint(x: left, y: h - r))
-        tab.addArc(tangent1End: CGPoint(x: left, y: h), tangent2End: CGPoint(x: left + r, y: h), radius: r)
-        tab.addLine(to: CGPoint(x: notchX + min(overlap, w), y: h))
-        tab.addLine(to: CGPoint(x: notchX + min(overlap, w), y: 0))
-        tab.closeSubpath()
-        // The notch body and its ears grow from the top with the tab: under a hardware cutout nobody sees the body,
-        // on a screen without one it is the notch.
-        let n = min(w / tabWidth, 1)
-        var shape = tab
-        shape.addPath(hang(notchX, notchX + geo.notchWidth, h * n, 12))
-        shape.addPath(ears(notchX, notchX + geo.notchWidth, ear * n))
-        ctx.fill(shape, with: .color(.black))
 
         // Orb: 24-pt box, 8 pt before the notch, vertically centred. Fades in as the tab uncovers it.
         let presence = min(max((w - 12) / 30, 0), 1)
