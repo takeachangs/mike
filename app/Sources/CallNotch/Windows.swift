@@ -26,8 +26,9 @@ import UniformTypeIdentifiers
             return w
         }()
         w.title = title
+        NSApp.activate()  // macOS 14 dropped activate(ignoringOtherApps:): the old call left the window behind
         w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        w.orderFrontRegardless()
     }
 }
 

@@ -70,6 +70,16 @@ if resident {
 /// Every way out goes through NSApp.terminate: the card's Quit, SIGTERM (bridge.py on hang-up, install.sh), logout,
 /// Activity Monitor. Termination waits until this app's own session has stopped and saved, then folds the notch.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Opening the app again (Finder, Spotlight, the Dock) while it runs: it has no window of its own, so show the
+    /// notch card, and the setup window until setup is done.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        MainActor.assumeIsolated {
+            if resident && !model.open { model.setOpen(true) }
+            if !UserDefaults.standard.bool(forKey: "onboarded") { Windows.settings(welcome: true) }
+        }
+        return false
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
             if resident { try? FileManager.default.removeItem(at: Paths.appPID) }
