@@ -31,7 +31,8 @@ import SwiftUI
     }
 
     /// What a click opens: the tab during a session; while resident and idle, the notch itself.
-    func clickable(_ pt: CGPoint) -> Bool { state == "off" ? resident && geo.notchRect.contains(pt) : geo.tabRect.contains(pt) }
+    // Idle: the swollen outline too (2 pt a side, 4 pt down), so the pointer on the swell does not flicker it off.
+    func clickable(_ pt: CGPoint) -> Bool { state == "off" ? resident && geo.notchRect.insetBy(dx: -2, dy: -4).contains(pt) : geo.tabRect.contains(pt) }
 
     /// A short message in the card (an error, "Saved"), opening the card when idle so it is seen.
     func say(_ text: String, for seconds: TimeInterval = 6) {
@@ -108,6 +109,7 @@ import SwiftUI
         hover(now)
         reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         func still(_ s: Spring) -> Bool { abs(s.value - s.target) < 0.001 && abs(s.velocity) < 0.01 }
+        retarget()  // before the stillness check, or a spring whose target just moved (pointer left) pauses the timeline a poll
         wake(state != "off" || open || pressed || overTab || starting != nil
              || ![cx, cy, fade, peek, width, press, orb].allSatisfy(still))
         if state != "off" || resident { offSince = nil; return }
@@ -130,10 +132,8 @@ import SwiftUI
         }
     }
 
-    func step(_ now: Date) {
-        let dt = min(0.05, last.map { now.timeIntervalSince($0) } ?? 0)
-        last = now; t += dt
-        spin += dt / (reduce ? 4 : 1.4)
+    /// Where every spring is heading, from the current state. Called per frame and at each poll.
+    func retarget() {
         let thinking = state == "thinking"
         // The tab belongs to a session; after a hang-up it stays until the card has landed on it. It never grows for the idle menu.
         width.target = state != "off" || (width.value > 0.1 && cy.value >= 0.2) ? tabWidth : 0
@@ -146,8 +146,15 @@ import SwiftUI
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
         press.target = pressed ? 0.6 : 1
         peek.target = state == "off" && overTab && !open && !reduce ? 1 : 0
+    }
+
+    func step(_ now: Date) {
+        let dt = min(0.05, last.map { now.timeIntervalSince($0) } ?? 0)
+        last = now; t += dt
+        spin += dt / (reduce ? 4 : 1.4)
+        retarget()
         width.step(dt); radius.step(dt); breath.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); peek.step(dt); press.step(dt)
-        let goal = thinking || state == "off" ? 0 : target
+        let goal = state == "thinking" || state == "off" ? 0 : target
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }
 
