@@ -4,7 +4,7 @@ import Security
 /// The OpenAI API key, kept in the login Keychain rather than a file. OPENAI_API_KEY in the environment still wins,
 /// so a terminal launch with the key exported needs no setup.
 public enum Keychain {
-    static let service = "com.takeachangs.callnotch", account = "openai-api-key"
+    static let service = "com.takeachangs.mike", account = "openai-api-key"
 
     public static var openAIKey: String? {
         if let env = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !env.isEmpty { return env }

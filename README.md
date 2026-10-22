@@ -1,4 +1,4 @@
-# CallNotch
+# Mike
 
 A Mac app that lives in your MacBook's notch. Click the notch to:
 
@@ -23,8 +23,8 @@ recording, with the same notch showing the session.
 Requires macOS 14 or later on Apple Silicon.
 
 ```bash
-cd app && scripts/build-app.sh          # builds and signs dist/CallNotch.app (ad-hoc unless SIGN_IDENTITY is set)
-scripts/install.sh --open               # quits a running copy, replaces /Applications/CallNotch.app, opens it
+cd app && scripts/build-app.sh          # builds and signs dist/Mike.app (ad-hoc unless SIGN_IDENTITY is set)
+scripts/install.sh --open               # quits a running copy, replaces /Applications/Mike.app, opens it
 ```
 
 The first launch shows a short setup window: allow the microphone,
@@ -36,8 +36,8 @@ Settings has the same controls plus sound volume and "Open at login".
 
 ```
 app/                    the Swift package (see app/Package.swift)
-  Sources/CallNotchKit  the library: recorder, Live call, state file, sessions, transcript, cues, Keychain
-  Sources/CallNotch     the app: notch panel, Library, Settings
+  Sources/MikeKit  the library: recorder, Live call, state file, sessions, transcript, cues, Keychain
+  Sources/Mike     the app: notch panel, Library, Settings
   Sources/Listen        the recorder as a command, for the /listen skill
   Tests/                swift-testing unit tests
   Resources/            Info.plist, entitlements, icon
@@ -47,7 +47,7 @@ prompt.txt              the voice prompt for agent-mode calls
 skill/                  the agent-side /call and /listen procedures, installed into a notes folder
 ```
 
-Runtime files live in `~/.claude-call/`, shared by the app, `bridge.py` and
+Runtime files live in `~/.mike/`, shared by the app, `bridge.py` and
 the skills: `state.json` (what the notch draws), `listen-<stamp>.txt`
 transcripts with optional `.md` notes, `transcript-<stamp>.json` calls, and
 the agent-mode inbox and outbox.
@@ -57,7 +57,7 @@ the agent-mode inbox and outbox.
 ```bash
 cd app && swift build && swift test     # build everything, run the unit tests
 uv run bridge.py selftest               # the agent-mode bridge's offline checks
-.build/debug/CallNotch                  # run the app from the build folder (from app/)
+.build/debug/Mike                  # run the app from the build folder (from app/)
 python3 scripts/drive.py                # cycle the notch through call states with no call (after a release build)
 .build/release/Listen out.txt --file talk.wav   # play a recording through the recorder in real time
 ```

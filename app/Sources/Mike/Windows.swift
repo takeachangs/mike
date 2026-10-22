@@ -1,6 +1,6 @@
 import AppKit
 import AVFoundation
-import CallNotchKit
+import MikeKit
 import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 
     static func library() { show("library", "Library", CGSize(width: 900, height: 600), Library()) }
     static func settings(welcome: Bool = false) {
-        if welcome { show("welcome", "Welcome to CallNotch", CGSize(width: 520, height: 600), SettingsView(welcome: true)) }
+        if welcome { show("welcome", "Welcome to Mike", CGSize(width: 520, height: 600), SettingsView(welcome: true)) }
         else { show("settings", "Settings", CGSize(width: 520, height: 560), SettingsView(welcome: false)) }
     }
 
@@ -169,7 +169,7 @@ struct SettingsView: View {
         Form {
             if welcome {
                 Section {
-                    Text("CallNotch lives in your MacBook's notch. Click the notch to start a voice call or record a lecture; past sessions are in the Library.")
+                    Text("Mike lives in your MacBook's notch. Click the notch to start a voice call or record a lecture; past sessions are in the Library.")
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

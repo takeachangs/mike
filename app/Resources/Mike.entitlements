@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<!-- Hardened runtime blocks the microphone unless the app asks for it. Not sandboxed: the app shares
-	     ~/.claude-call with bridge.py and the agent skills, and starts afplay for the cue sounds. -->
+	     ~/.mike with bridge.py and the agent skills, and starts afplay for the cue sounds. -->
 	<key>com.apple.security.device.audio-input</key><true/>
 </dict>
 </plist>

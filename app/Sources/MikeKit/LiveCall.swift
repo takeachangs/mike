@@ -51,7 +51,7 @@ public final class LiveCall: @unchecked Sendable {
 
     private let model: String, instructions: String
     private let task: URLSessionWebSocketTask?
-    private let q = DispatchQueue(label: "callnotch.call")
+    private let q = DispatchQueue(label: "mike.call")
     private let meter = OSAllocatedUnfairLock(initialState: Meter())
     private let ticker: StateTicker
     private let mic = AVAudioEngine(), out = AVAudioEngine(), player = AVAudioPlayerNode()

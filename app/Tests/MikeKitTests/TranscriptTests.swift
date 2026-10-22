@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import CallNotchKit
+@testable import MikeKit
 
 @Suite struct TranscriptTests {
     let utc = TimeZone(identifier: "UTC")!

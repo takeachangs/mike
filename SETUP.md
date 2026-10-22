@@ -1,4 +1,4 @@
-# Setting up call-notch
+# Setting up mike
 
 Instructions for a coding agent (Claude Code, Codex, Gemini CLI, Cursor, or
 similar). The person has asked you to "set this up". Read this whole file,
@@ -30,7 +30,7 @@ top centre of the screen instead.
 ## 1. Get the code
 
 ```bash
-git clone https://github.com/takeachangs/call-notch ~/projects/call-notch
+git clone https://github.com/takeachangs/mike ~/projects/mike
 ```
 
 Any location works as long as it is **not** inside a folder that syncs to
@@ -40,16 +40,16 @@ Swift build directory churns and would upload on every compile.
 ## 2. Build and install the app
 
 ```bash
-cd ~/projects/call-notch/app && scripts/build-app.sh && scripts/install.sh
+cd ~/projects/mike/app && scripts/build-app.sh && scripts/install.sh
 ```
 
 The first build fetches FluidAudio and takes a few minutes. Expect
-`built dist/CallNotch.app`. The bridge and the skills use the installed
+`built dist/Mike.app`. The bridge and the skills use the installed
 copy in `/Applications` (the notch, and the `Listen` command inside it).
 Then prove the notch draws, without any API call:
 
 ```bash
-cd ~/projects/call-notch/app && swift build -c release && python3 scripts/drive.py
+cd ~/projects/mike/app && swift build -c release && python3 scripts/drive.py
 ```
 
 For about eleven seconds a black tab grows to the left of the notch: one
@@ -63,13 +63,13 @@ This opens a session and closes it immediately. It costs nothing
 noticeable and confirms the key has GPT-Live access:
 
 ```bash
-cd ~/projects/call-notch && uv run bridge.py selftest
+cd ~/projects/mike && uv run bridge.py selftest
 ```
 
 prints `ok` (local checks only). Then:
 
 ```bash
-cd ~/projects/call-notch && uv run --with 'openai>=3.27' --with websockets python - <<'PY'
+cd ~/projects/mike && uv run --with 'openai>=3.27' --with websockets python - <<'PY'
 import asyncio
 from openai import AsyncOpenAI
 async def main():
@@ -118,7 +118,7 @@ bridge, watch an inbox file, answer each delegation, hand the text back.
   paste its body under a `## /call` heading in the notes folder's
   `AGENTS.md`. The person then types "start a call" instead of `/call`.
 
-Edit the copied file's paths if the repo is not at `~/projects/call-notch`.
+Edit the copied file's paths if the repo is not at `~/projects/mike`.
 
 The procedure needs two things from the agent's tool set: a way to run a
 long-lived command the person can see and stop (a terminal tab), and a way
@@ -136,7 +136,7 @@ Copy `skill/listen/SKILL.md` to `<notes>/.claude/skills/listen/SKILL.md`
 microphone, play any speech recording through it in real time:
 
 ```bash
-/Applications/CallNotch.app/Contents/MacOS/Listen /tmp/listen-test.txt --file speech.wav
+/Applications/Mike.app/Contents/MacOS/Listen /tmp/listen-test.txt --file speech.wav
 ```
 
 The first run downloads the model (about 600 MB). Expect the notch tab
@@ -152,8 +152,8 @@ call" (or `/call`). Check off:
 2. They say hello; the voice answers without delegating.
 3. They ask something about their notes. The voice says it will check, the
    notch shows the twin orbit, a line lands in
-   `~/.claude-call/inbox.jsonl`, the agent answers with
-   `uv run ~/projects/call-notch/bridge.py say <id> "…"`, and the voice
+   `~/.mike/inbox.jsonl`, the agent answers with
+   `uv run ~/projects/mike/bridge.py say <id> "…"`, and the voice
    speaks it.
 4. They say "that's all". The voice says goodbye ending in "Hanging up
    now.", the session closes, the notch tab collapses, and the agent sees
@@ -176,9 +176,9 @@ one without being asked.
   centred tab. Make the built-in display the main one, or accept the
   fallback.
 - **The notch never folds away**: a session's notch quits on `off` in
-  `~/.claude-call/state.json` or when that file is older than three
+  `~/.mike/state.json` or when that file is older than three
   seconds; the resident app (started on its own) stays by design and quits
-  from its card. If something died hard, `pkill CallNotch`.
+  from its card. If something died hard, `pkill Mike`.
 - **The voice answers notes questions itself instead of delegating**: the
   Delegation section in `prompt.txt` is the knob. Add the kind of question
   it answered to the list.

@@ -1,9 +1,9 @@
 import Foundation
 import Testing
-@testable import CallNotchKit
+@testable import MikeKit
 
 @Suite struct StateFileTests {
-    let url = FileManager.default.temporaryDirectory.appending(path: "callnotch-state-\(UUID().uuidString).json")
+    let url = FileManager.default.temporaryDirectory.appending(path: "mike-state-\(UUID().uuidString).json")
 
     @Test func roundTripsAndRoundsLevel() {
         StateFile.write(SessionState(state: "listening", level: 0.12345, muted: true, pid: 42, mode: .listen), to: url)

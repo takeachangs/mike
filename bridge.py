@@ -10,15 +10,15 @@
   uv run bridge.py note ID "text"  quiet progress for delegation ID
   uv run bridge.py selftest
 
-Delegations land in ~/.claude-call/inbox.jsonl as one JSON line each:
+Delegations land in ~/.mike/inbox.jsonl as one JSON line each:
   {"id": ..., "offset_ms": ..., "transcript": [["user"|"assistant", text], ...]}
 A final {"event": "closed", "seconds": ..., "transcript": [...]} line ends the
 call; `seconds` is the API's final billed audio duration (null if the close was
 never confirmed). Replies go through the outbox (written by `say` / `note`) and
-are forwarded to the Live session. During a call ~/.claude-call/state.json
-carries {"state", "level", "muted", "pid", "mode"} at 20 Hz for the notch (CallNotch.app), which
+are forwarded to the Live session. During a call ~/.mike/state.json
+carries {"state", "level", "muted", "pid", "mode"} at 20 Hz for the notch (Mike.app), which
 is launched here if it has been built; its buttons signal this process
-(SIGUSR1 toggles mute, SIGINT hangs up). ~/.claude-call/context.txt, if present,
+(SIGUSR1 toggles mute, SIGINT hangs up). ~/.mike/context.txt, if present,
 seeds the session as a developer message. The call closes itself after
 IDLE_AFTER seconds with no speech, no audio out and no delegation pending.
 Short cues (the app's cue files, SOUNDS) play quietly at call start, mute and unmute, each
@@ -29,15 +29,15 @@ import asyncio, base64, json, math, os, queue, signal, subprocess, sys, threadin
 from array import array
 from pathlib import Path
 
-STATE = Path.home() / ".claude-call"
+STATE = Path.home() / ".mike"
 INBOX, OUTBOX, STATE_FILE = STATE / "inbox.jsonl", STATE / "outbox.jsonl", STATE / "state.json"
 REPO = Path(__file__).resolve().parent
-# The notch: an installed CallNotch.app first, then this checkout's build (scripts/build-app.sh, or a plain swift build).
-NOTCH_APP = next((p for p in (Path("/Applications/CallNotch.app/Contents/MacOS/CallNotch"),
-                              Path.home() / "Applications/CallNotch.app/Contents/MacOS/CallNotch",
-                              REPO / "app/dist/CallNotch.app/Contents/MacOS/CallNotch",
-                              REPO / "app/.build/release/CallNotch") if p.exists()), REPO / "app/.build/release/CallNotch")
-SOUNDS = REPO / "app/Sources/CallNotchKit/Resources/sounds"
+# The notch: an installed Mike.app first, then this checkout's build (scripts/build-app.sh, or a plain swift build).
+NOTCH_APP = next((p for p in (Path("/Applications/Mike.app/Contents/MacOS/Mike"),
+                              Path.home() / "Applications/Mike.app/Contents/MacOS/Mike",
+                              REPO / "app/dist/Mike.app/Contents/MacOS/Mike",
+                              REPO / "app/.build/release/Mike") if p.exists()), REPO / "app/.build/release/Mike")
+SOUNDS = REPO / "app/Sources/MikeKit/Resources/sounds"
 CUES = ("start", "pause", "stop", "wait", "ready")  # <name>.wav in SOUNDS, rendered by app/scripts/make-sounds.py; the app plays the same files
 
 
@@ -80,7 +80,7 @@ def cue(name: str) -> None:
 
 
 def app_running() -> bool:
-    """True when the resident notch app (CallNotch started on its own) is up; it then shows this call itself."""
+    """True when the resident notch app (Mike started on its own) is up; it then shows this call itself."""
     try:
         os.kill(int((STATE / "app.pid").read_text()), 0)
         return True

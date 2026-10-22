@@ -10,7 +10,7 @@ public enum Cue: String, CaseIterable, Sendable {
     /// SwiftPM's Bundle.module only looks at the .app's top level (which code signing rejects) and the build folder,
     /// so look in Contents/Resources first, then next to the executable (a plain `swift build`), then Bundle.module.
     static let resources: Bundle = {
-        let name = "CallNotch_CallNotchKit.bundle"
+        let name = "Mike_MikeKit.bundle"
         let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().deletingLastPathComponent()
         return [Bundle.main.resourceURL, exe].compactMap { $0?.appending(path: name) }.lazy.compactMap { Bundle(url: $0) }.first ?? .module
     }()

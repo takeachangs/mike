@@ -1,10 +1,10 @@
 // Listen: the /listen recorder as a command, for the agent-side skill. Transcribes the mic into a per-minute transcript
-// at the path given (see Recorder in CallNotchKit). Ctrl-C (SIGINT) stops; SIGUSR1 pauses and resumes. Shows the
-// recording in the notch: a resident CallNotch app picks it up from the state file, otherwise this launches the
-// CallNotch executable next to it for the length of the recording, the way bridge.py does for a call.
+// at the path given (see Recorder in MikeKit). Ctrl-C (SIGINT) stops; SIGUSR1 pauses and resumes. Shows the
+// recording in the notch: a resident Mike app picks it up from the state file, otherwise this launches the
+// Mike executable next to it for the length of the recording, the way bridge.py does for a call.
 // usage: Listen <transcript.txt> [--file audio.wav]   (--file plays a recording in real time instead of the mic, for testing)
 //        Listen --cue start|pause|stop|wait|ready     (plays one cue sound at the CALL_SOUND_VOLUME level and exits)
-import CallNotchKit
+import MikeKit
 import Foundation
 
 setvbuf(stdout, nil, _IOLBF, 0)  // line-buffered even when piped, so "listening started" shows up at once
@@ -45,7 +45,7 @@ try await recorder.start(testFile.map { .file($0) } ?? .microphone, models: mode
 var notch: Process?
 let resident = (try? String(contentsOf: Paths.appPID, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
 let notchApp = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).resolvingSymlinksInPath()
-    .deletingLastPathComponent().appending(path: "CallNotch")
+    .deletingLastPathComponent().appending(path: "Mike")
 if resident.map({ kill($0, 0) == 0 }) != true, FileManager.default.isExecutableFile(atPath: notchApp.path) {
     let p = Process()
     p.executableURL = notchApp

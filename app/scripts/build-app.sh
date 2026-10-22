@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds dist/CallNotch.app and dist/CallNotch-<version>.zip from app/. Apple Silicon only (the speech model runs on
+# Builds dist/Mike.app and dist/Mike-<version>.zip from app/. Apple Silicon only (the speech model runs on
 # the Neural Engine).
 #   SIGN_IDENTITY="Developer ID Application: Name (TEAMID)"  sign for distribution with the hardened runtime
 #                                                             (default: ad-hoc, which runs only on this Mac)
@@ -11,15 +11,15 @@ VERSION=$(cat VERSION)
 BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 1)
 IDENTITY=${SIGN_IDENTITY:--}
 
-swift build -c release --arch arm64 --product CallNotch
+swift build -c release --arch arm64 --product Mike
 swift build -c release --arch arm64 --product Listen
 BIN=$(swift build -c release --arch arm64 --show-bin-path)
 
-APP=dist/CallNotch.app
+APP=dist/Mike.app
 rm -rf dist
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN/CallNotch" "$BIN/Listen" "$APP/Contents/MacOS/"
-cp -R "$BIN/CallNotch_CallNotchKit.bundle" "$APP/Contents/Resources/"
+cp "$BIN/Mike" "$BIN/Listen" "$APP/Contents/MacOS/"
+cp -R "$BIN/Mike_MikeKit.bundle" "$APP/Contents/Resources/"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" Resources/Info.plist > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
@@ -28,11 +28,11 @@ plutil -lint "$APP/Contents/Info.plist" >/dev/null
 # resource bundle is data, not code, and older SwiftPM builds it flat, which codesign rejects as a bundle). The hardened
 # runtime (--options runtime) is what notarization requires; ad-hoc signatures skip it so the app runs locally.
 RUNTIME=(); [ "$IDENTITY" != "-" ] && RUNTIME=(--options runtime --timestamp)
-codesign --force --sign "$IDENTITY" ${RUNTIME[@]+"${RUNTIME[@]}"} --entitlements Resources/CallNotch.entitlements "$APP/Contents/MacOS/Listen"
-codesign --force --sign "$IDENTITY" ${RUNTIME[@]+"${RUNTIME[@]}"} --entitlements Resources/CallNotch.entitlements "$APP"
+codesign --force --sign "$IDENTITY" ${RUNTIME[@]+"${RUNTIME[@]}"} --entitlements Resources/Mike.entitlements "$APP/Contents/MacOS/Listen"
+codesign --force --sign "$IDENTITY" ${RUNTIME[@]+"${RUNTIME[@]}"} --entitlements Resources/Mike.entitlements "$APP"
 codesign --verify --strict --deep "$APP"
 
-ZIP="dist/CallNotch-$VERSION.zip"
+ZIP="dist/Mike-$VERSION.zip"
 ditto -c -k --keepParent "$APP" "$ZIP"
 if [ -n "${NOTARY_PROFILE:-}" ]; then
     [ "$IDENTITY" = "-" ] && { echo "notarizing needs SIGN_IDENTITY set to a Developer ID" >&2; exit 1; }

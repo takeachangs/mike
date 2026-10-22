@@ -1,9 +1,9 @@
 import Foundation
 import os
 
-/// Where everything lives. `~/.claude-call/` is shared with bridge.py and the agent-side skills, so it stays put.
+/// Where everything lives. `~/.mike/` is shared with bridge.py and the agent-side skills, so it stays put.
 public enum Paths {
-    public static let stateDir = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude-call")
+    public static let stateDir = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".mike")
     public static let stateFile = stateDir.appending(path: "state.json")
     public static let appPID = stateDir.appending(path: "app.pid")
 
@@ -33,7 +33,7 @@ public enum Paths {
 }
 
 public enum Log {
-    public static let app = Logger(subsystem: "com.takeachangs.callnotch", category: "app")
-    public static let recorder = Logger(subsystem: "com.takeachangs.callnotch", category: "recorder")
-    public static let call = Logger(subsystem: "com.takeachangs.callnotch", category: "call")
+    public static let app = Logger(subsystem: "com.takeachangs.mike", category: "app")
+    public static let recorder = Logger(subsystem: "com.takeachangs.mike", category: "recorder")
+    public static let call = Logger(subsystem: "com.takeachangs.mike", category: "call")
 }

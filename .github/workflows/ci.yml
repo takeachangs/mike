@@ -55,25 +55,25 @@ jobs:
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
           NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-        run: xcrun notarytool store-credentials callnotch --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID"
+        run: xcrun notarytool store-credentials mike --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID"
 
       - name: Build app
         working-directory: app
         env:
           SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
-          NOTARY_PROFILE: ${{ env.HAS_NOTARY == 'true' && 'callnotch' || '' }}
+          NOTARY_PROFILE: ${{ env.HAS_NOTARY == 'true' && 'mike' || '' }}
         run: scripts/build-app.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CallNotch
+          name: Mike
           path: app/dist/*.zip
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" app/dist/*.zip --title "CallNotch $GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" app/dist/*.zip --title "Mike $GITHUB_REF_NAME" --generate-notes
 
 permissions:
   contents: write  # for the release on tags

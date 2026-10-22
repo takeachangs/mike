@@ -1,6 +1,6 @@
 import Foundation
 
-/// One saved call or recording in ~/.claude-call, for the Library.
+/// One saved call or recording in ~/.mike, for the Library.
 public struct Session: Identifiable, Sendable {
     public enum Kind: Sendable { case call, recording }
     public let id: URL  // the transcript file

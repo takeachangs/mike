@@ -1,6 +1,6 @@
 import Foundation
 
-/// `~/.claude-call/state.json`: what the notch draws. Written atomically every 50 ms by whoever runs the session
+/// `~/.mike/state.json`: what the notch draws. Written atomically every 50 ms by whoever runs the session
 /// (bridge.py, the Listen CLI, or the app's own call and recorder); a file older than 3 s means that writer died.
 public struct SessionState: Codable, Equatable, Sendable {
     public enum Mode: String, Codable, Sendable { case call, listen }
@@ -38,7 +38,7 @@ public enum StateFile {
 
 /// Rewrites the state file every 50 ms from a background queue until stopped; the last write is always `off`.
 public final class StateTicker: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "callnotch.state")
+    private let queue = DispatchQueue(label: "mike.state")
     private var timer: DispatchSourceTimer?
     private let current: () -> SessionState
 

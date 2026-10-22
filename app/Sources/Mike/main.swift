@@ -1,14 +1,14 @@
-// CallNotch: lives in the MacBook notch. Two ways to run:
+// Mike: lives in the MacBook notch. Two ways to run:
 // - On its own (the app, at login or from Finder) it is resident: clicking the notch opens Call / Listen / Library /
 //   Settings / Quit. Calls (GPT-Live) and recordings (Parakeet Ultra, on-device) run inside the app, and it shows any
-//   other session too (a skill's /call or /listen) from ~/.claude-call/state.json. Its pid goes in app.pid so those
+//   other session too (a skill's /call or /listen) from ~/.mike/state.json. Its pid goes in app.pid so those
 //   sessions do not start a second notch.
-//   `open -a CallNotch --args --listen` starts a recording right away; `--test-audio <file>` records a file played in
+//   `open -a Mike --args --listen` starts a recording right away; `--test-audio <file>` records a file played in
 //   real time instead of the mic (for testing without speaking).
 // - Launched by a session with CALL_BRIDGE_PID (bridge.py, the Listen CLI, notch/drive.py) it is only that session's
 //   indicator and quits when the session ends. CALL_NOTCH_MODE=listen labels it as a recorder.
 import AppKit
-import CallNotchKit
+import MikeKit
 import SwiftUI
 
 let env = ProcessInfo.processInfo.environment
@@ -17,7 +17,7 @@ let resident = envPID == nil
 
 if CommandLine.arguments.contains("--version") { print(appVersion); exit(0) }
 if resident, let other = (try? String(contentsOf: Paths.appPID, encoding: .utf8)).flatMap({ pid_t($0) }), other != getpid(), kill(other, 0) == 0 {
-    print("CallNotch is already at the notch (pid \(other))")
+    print("Mike is already at the notch (pid \(other))")
     exit(0)
 }
 
@@ -41,7 +41,7 @@ MainActor.assumeIsolated {
     model.panel = panel
     if env["CALL_NOTCH_OPEN"] != nil { model.setOpen(true) }  // ponytail: debug, starts with the card open
 }
-Log.app.info("CallNotch \(appVersion, privacy: .public) started, \(resident ? "resident" : "session", privacy: .public)")
+Log.app.info("Mike \(appVersion, privacy: .public) started, \(resident ? "resident" : "session", privacy: .public)")
 
 Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in MainActor.assumeIsolated { model.poll() } }
 

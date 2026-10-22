@@ -1,10 +1,10 @@
 import Foundation
 import Testing
-@testable import CallNotchKit
+@testable import MikeKit
 
 @Suite struct SessionTests {
     let dir: URL = {
-        let d = FileManager.default.temporaryDirectory.appending(path: "callnotch-sessions-\(UUID().uuidString)")
+        let d = FileManager.default.temporaryDirectory.appending(path: "mike-sessions-\(UUID().uuidString)")
         try! FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }()

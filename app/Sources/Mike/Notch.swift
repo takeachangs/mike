@@ -1,8 +1,8 @@
 import AppKit
-import CallNotchKit
+import MikeKit
 import SwiftUI
 
-/// The notch's state and drawing. Reads ~/.claude-call/state.json at 20 Hz, whoever wrote it: this app's own call or
+/// The notch's state and drawing. Reads ~/.mike/state.json at 20 Hz, whoever wrote it: this app's own call or
 /// recorder, the Listen CLI, or bridge.py.
 @MainActor final class Notch: ObservableObject {
     let resident: Bool, envPID: pid_t?

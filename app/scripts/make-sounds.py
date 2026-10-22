@@ -39,5 +39,5 @@ for name, (notes, gap) in CUES.items():
         dsp.place(y, tone(N[n], dur), i * gap, gain=0.85 ** i)  # later notes slightly softer
     y = fx.reverb(dsp.butter(y, "low", 5000), dsp.rng(7), rt60=0.4, size=0.7, damp=0.6, wet=0.15, width=1.0)
     y = dsp.normalize(dsp.fade(dsp.trim_tail(y, floor_db=-60), fin=0.002, fout=0.05), -1.0)
-    sf.write(Path(__file__).resolve().parent.parent / "Sources/CallNotchKit/Resources/sounds" / f"{name}.wav", y, SR, subtype="PCM_16")
+    sf.write(Path(__file__).resolve().parent.parent / "Sources/MikeKit/Resources/sounds" / f"{name}.wav", y, SR, subtype="PCM_16")
     print(f"{name:6s} {len(y) / SR:4.2f} s  {check(y, SR)['summary']}")

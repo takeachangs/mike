@@ -1,5 +1,5 @@
 import AVFoundation
-import CallNotchKit
+import MikeKit
 import Foundation
 
 enum LaunchError: LocalizedError {

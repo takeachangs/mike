@@ -4,21 +4,21 @@ Guidance for Claude Code when working in this repository.
 
 # What this is
 
-CallNotch, a Mac app that lives in the MacBook notch. On its own it makes plain GPT-Live voice calls (`gpt-live-1`, user's own OpenAI key), records lectures with on-device transcription (Parakeet Ultra via FluidAudio), and keeps a Library of both. It is also the notch for a coding-agent workflow: `bridge.py` runs agent-mode calls (client delegation, answered by an agent session on a notes folder) and the `Listen` command records for the `/listen` skill. `README.md` is the human overview, `SETUP.md` is the agent-mode install procedure for a coding agent.
+Mike, a Mac app that lives in the MacBook notch. On its own it makes plain GPT-Live voice calls (`gpt-live-1`, user's own OpenAI key), records lectures with on-device transcription (Parakeet Ultra via FluidAudio), and keeps a Library of both. It is also the notch for a coding-agent workflow: `bridge.py` runs agent-mode calls (client delegation, answered by an agent session on a notes folder) and the `Listen` command records for the `/listen` skill. `README.md` is the human overview, `SETUP.md` is the agent-mode install procedure for a coding agent.
 
 # Layout
 
 ```
 app/Package.swift                    one SwiftPM package; FluidAudio is its only dependency
-app/Sources/CallNotchKit/            the library everything else is built on
+app/Sources/MikeKit/            the library everything else is built on
   Recorder.swift                       mic (or a file played in real time) -> Parakeet Ultra -> per-minute transcript; state file; cues
   LiveCall.swift, LiveProtocol.swift   the solo GPT-Live call: WebSocket protocol codec, mic/speaker audio, state file, transcript file
-  StateFile.swift, Paths.swift         ~/.claude-call paths, the state file and its 20 Hz ticker, os.Logger categories
+  StateFile.swift, Paths.swift         ~/.mike paths, the state file and its 20 Hz ticker, os.Logger categories
   Sessions.swift, Transcript.swift     Library parsing of saved sessions; the per-minute transcript builder
   Cues.swift, Keychain.swift           cue sounds (Resources/sounds, played with afplay); the OpenAI key in the Keychain
-app/Sources/CallNotch/               the app: notch panel and drawing, in-app sessions (Launch.swift), Library and Settings windows
+app/Sources/Mike/               the app: notch panel and drawing, in-app sessions (Launch.swift), Library and Settings windows
 app/Sources/Listen/main.swift        the recorder as a command for the /listen skill; launches the notch if no resident app is up
-app/Tests/CallNotchKitTests/         swift-testing unit tests for the library
+app/Tests/MikeKitTests/         swift-testing unit tests for the library
 app/Resources/                       Info.plist template, entitlements, AppIcon.icns
 app/scripts/                         build-app.sh (bundle, sign, notarize, zip), install.sh (safe replace in /Applications), make-icon.swift, make-sounds.py (needs earshot), drive.py
 bridge.py                            agent-mode call: Live session, audio, inbox/outbox, state file, notch launch (single file, uv inline deps)
@@ -27,15 +27,15 @@ skill/SKILL.md, skill/listen/SKILL.md  generic copies of the agent-side /call an
 .github/workflows/ci.yml             tests and an app build on pull requests and pushes to main; a v* tag publishes the zip as a release
 ```
 
-Runtime state lives outside the repo in `~/.claude-call/`: `state.json`, `app.pid`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), `listen-<stamp>.txt` per recording (paragraphs starting `HH:MM `) with the agent's `listen-<stamp>.md` notes beside it, and for agent mode `context.txt`, `inbox.jsonl`, `outbox.jsonl` and `board/`. Settings (sound volume, onboarded) are in the app's UserDefaults; the OpenAI key is in the login Keychain (`com.takeachangs.callnotch`).
+Runtime state lives outside the repo in `~/.mike/`: `state.json`, `app.pid`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), `listen-<stamp>.txt` per recording (paragraphs starting `HH:MM `) with the agent's `listen-<stamp>.md` notes beside it, and for agent mode `context.txt`, `inbox.jsonl`, `outbox.jsonl` and `board/`. Settings (sound volume, onboarded) are in the app's UserDefaults; the OpenAI key is in the login Keychain (`com.takeachangs.mike`).
 
 # Commands
 
 ```bash
 cd app && swift build && swift test                 # build everything and run the unit tests
-cd app && scripts/build-app.sh                      # dist/CallNotch.app + zip; SIGN_IDENTITY / NOTARY_PROFILE for a release
-cd app && scripts/install.sh --open                 # quit the running app, replace /Applications/CallNotch.app, open it (never cp -R over it)
-app/.build/debug/CallNotch                          # the resident app from a dev build (notch click: Call / Listen / Library / Settings / Quit)
+cd app && scripts/build-app.sh                      # dist/Mike.app + zip; SIGN_IDENTITY / NOTARY_PROFILE for a release
+cd app && scripts/install.sh --open                 # quit the running app, replace /Applications/Mike.app, open it (never cp -R over it)
+app/.build/debug/Mike                          # the resident app from a dev build (notch click: Call / Listen / Library / Settings / Quit)
 python3 app/scripts/drive.py                        # the notch against a fake session, no call (needs a release build; Ctrl-C stops both)
 app/.build/release/Listen out.txt --file x.wav      # play a recording through the recorder in real time, notch included, no mic
 uv run bridge.py selftest                           # bridge offline checks, no API call, prints ok
@@ -46,9 +46,9 @@ uv run bridge.py say  ID "text" / note ID "text"    # spoken result / quiet prog
 # How sessions run
 
 - **App, solo call**: Settings' key (or `OPENAI_API_KEY`) -> `LiveCall` in the app process. Hang-up is the card's button, the voice saying the sign-off, or silence (Settings: Never / 15-90 s, default 30): silence means no transcribed user words and no voice audio, never mic loudness, with the `wait` cue 10 s before, and a muted call never times out. The transcript is saved like bridge.py's.
-- **App, recording**: `Recorder` in the app process, into `~/.claude-call/listen-<stamp>.txt`. The model downloads on first use with progress in the card (or ahead of time from Settings).
+- **App, recording**: `Recorder` in the app process, into `~/.mike/listen-<stamp>.txt`. The model downloads on first use with progress in the card (or ahead of time from Settings).
 - **Agent-mode call**: `bridge.py` opens the Live session (seeding `context.txt`, capped at 4000 characters), writes delegations `{"id", "offset_ms", "transcript"}` to the inbox, forwards the agent's `say` / `note` from the outbox, and on hang-up (Ctrl-C, the notch's button, the sign-off, 90 s idle) writes `{"event": "closed", "seconds", "transcript"}` to the inbox and saves the transcript file.
-- **Skill recording**: `Listen <path>` (the binary inside CallNotch.app, or `app/.build/release/Listen`), stopped by Ctrl-C or the notch's stop button.
+- **Skill recording**: `Listen <path>` (the binary inside Mike.app, or `app/.build/release/Listen`), stopped by Ctrl-C or the notch's stop button.
 
 # Contracts that must not drift
 
@@ -57,9 +57,9 @@ Changing any of these means changing every side in the same commit.
 - **`Hanging up now`**: `SIGN_OFF` in `bridge.py`, the "Ending the call" section of `prompt.txt`, `SOLO_INSTRUCTIONS` in bridge.py and `LiveCall.soloInstructions` (identical text), and both skill files. Hearing it in the output transcript closes the session.
 - **`Dates you may answer directly`** and **`Board open:`**: between `prompt.txt` and the /call skill.
 - **State file**: `{"state": "listening" | "thinking" | "speaking" | "off", "level": 0..1, "muted": bool, "pid": int, "mode": "call" | "listen"}`, written atomically every 50 ms even when unchanged, and `off` last. Writers: `bridge.py`, `Recorder` and `LiveCall` (`SessionState`/`StateTicker`). The notch treats a file older than 3 s as a dead session. `muted` means paused for a recording; `thinking` means a delegation has no `say` yet.
-- **Session -> notch launch and signals**: a session launches `CallNotch` with `CALL_BRIDGE_PID` (and `CALL_NOTCH_MODE=listen` for a recording) only when `app.pid` names no live process; that notch quits with the session. The card's mute/pause sends SIGUSR1 and hang-up/stop sends SIGINT to the state file's `pid` (or `CALL_BRIDGE_PID`); for a session inside the resident app it calls the session directly.
-- **Resident app**: `CallNotch` without `CALL_BRIDGE_PID` stays at the notch, writes `app.pid` (removed whenever it quits: every quit goes through the app delegate, which first stops and saves its own session; a second copy exits) and shows any session from the state file.
-- **Cue sounds**: `start` (also resume/unmute), `pause`, `stop`, `wait`, `ready` in `app/Sources/CallNotchKit/Resources/sounds/`, played with `afplay -v <volume>` (default 0.25, `0` = off) by bridge.py, the app, Listen, and the listen skill through `Listen --cue ready` (never a path inside the bundle: its layout depends on the SwiftPM version). The app takes the volume from Settings; bridge.py and Listen from `CALL_SOUND_VOLUME`. bridge.py's `selftest` and the Swift tests check the files exist.
+- **Session -> notch launch and signals**: a session launches `Mike` with `CALL_BRIDGE_PID` (and `CALL_NOTCH_MODE=listen` for a recording) only when `app.pid` names no live process; that notch quits with the session. The card's mute/pause sends SIGUSR1 and hang-up/stop sends SIGINT to the state file's `pid` (or `CALL_BRIDGE_PID`); for a session inside the resident app it calls the session directly.
+- **Resident app**: `Mike` without `CALL_BRIDGE_PID` stays at the notch, writes `app.pid` (removed whenever it quits: every quit goes through the app delegate, which first stops and saves its own session; a second copy exits) and shows any session from the state file.
+- **Cue sounds**: `start` (also resume/unmute), `pause`, `stop`, `wait`, `ready` in `app/Sources/MikeKit/Resources/sounds/`, played with `afplay -v <volume>` (default 0.25, `0` = off) by bridge.py, the app, Listen, and the listen skill through `Listen --cue ready` (never a path inside the bundle: its layout depends on the SwiftPM version). The app takes the volume from Settings; bridge.py and Listen from `CALL_SOUND_VOLUME`. bridge.py's `selftest` and the Swift tests check the files exist.
 - **Transcript files**: calls `{"seconds": number|null, "transcript": [[role, text], ...]}` (older ones are a bare list); recordings `HH:MM text` paragraphs. `Session.parse` reads both; keep it in step with the writers.
 - **Inbox and outbox line shapes**, as above. The bridge truncates outbox content at 1500 characters and empties both files at call start, so an agent can count lines from zero.
 - **Audio**: 24 kHz mono int16 PCM both ways for GPT-Live.

@@ -28,7 +28,7 @@ struct NotchView: View {
     /// Resident and idle: what the app can start.
     func actions() -> some View {
         VStack(spacing: 10) {
-            reveal(label(m.notice ?? "CallNotch", alert: m.notice != nil), after: 0.08)
+            reveal(label(m.notice ?? "Mike", alert: m.notice != nil), after: 0.08)
             reveal(HStack(spacing: 14) {
                 action("phone.fill", "Call", fill: Color(red: 0.19, green: 0.78, blue: 0.35), lit: Color(red: 0.3, green: 0.85, blue: 0.45)) { m.launch(listen: false) }
                 action("waveform", "Listen") { m.launch(listen: true) }

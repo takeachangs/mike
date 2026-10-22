@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import CallNotchKit
+@testable import MikeKit
 
 @Suite struct LiveProtocolTests {
     func object(_ text: String) -> [String: Any]? {
