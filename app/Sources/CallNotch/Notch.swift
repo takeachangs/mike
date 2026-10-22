@@ -9,7 +9,7 @@ import SwiftUI
     weak var panel: NSPanel?
     var state = "off", target = 0.0, level = 0.0, hangUp = false, muted = false, mutedAt = Date.distantPast
     var t = 0.0, spin = 0.0, last: Date?, offSince: Date?
-    var pid: pid_t?, recorderMode: Bool, since = Date()  // the session's, from the state file
+    var pid: pid_t?, recorderMode: Bool, since = Date(), live = false  // the session's, from the state file
     var starting: Date?, progress: Double?  // a session this app is starting: model download / load, or connecting
     var notice: String?, noticeUntil = Date.distantPast
     var recorder: Recorder?, call: LiveCall?  // sessions running inside this app
@@ -71,7 +71,9 @@ import SwiftUI
         let waiting = starting.map { now.timeIntervalSince($0) < 600 } == true  // first run downloads ~600 MB
         let was = state
         state = hangUp ? "off" : p?.isLive == true ? p!.state : waiting ? "thinking" : "off"
-        if was == "off" && state != "off" { since = now }
+        // The timer starts when the session itself does (recorder running, call connected), not while it loads.
+        if p?.isLive == true && !live { since = now }
+        live = p?.isLive == true
         pid = p?.isLive == true ? p?.pid : nil  // never keep a finished session's pid: it may be reused by then
         if let p, p.isLive { recorderMode = p.mode == .listen || ProcessInfo.processInfo.environment["CALL_NOTCH_MODE"] == "listen" }
         target = min(max(p?.level ?? 0, 0), 1)
