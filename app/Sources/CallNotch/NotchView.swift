@@ -6,8 +6,9 @@ struct NotchView: View {
     var body: some View {
         // Full display rate while anything moves (120 Hz on ProMotion); paused when idle (Notch.awake).
         TimelineView(.animation(minimumInterval: nil, paused: !m.awake)) { tl in
-            let _ = m.step(tl.date)  // once per frame, before both the shape and the content's clip read the springs
-            Canvas { ctx, size in m.draw(&ctx, size) }
+            // step runs in the canvas closure so it captures the tick's date: a closure holding only `m` compares equal
+            // each frame and SwiftUI skips the redraw. The content's clip below reads the springs a frame behind, unseen.
+            Canvas { ctx, size in m.step(tl.date); m.draw(&ctx, size) }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)  // the orb shrinks on pointer-down; release over the tab toggles the card
                 .onChanged { g in m.pressed = m.clickable(g.startLocation) }
