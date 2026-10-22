@@ -21,7 +21,7 @@ import SwiftUI
     // The card morphs out of the notch on two springs, width (cx) and height (cy), 0 = the closed shape, 1 = the card:
     // opening leads with width (the notch widens, then drops), closing leads with height (it ends as a notch-tall pill
     // narrowing into the cutout). Responses are set per direction in step(). Reduce Motion cross-fades instead (fade).
-    var cx = Spring(0, response: 0.28), cy = Spring(0, response: 0.40), fade = Spring(0, response: 0.2)
+    var cx = Spring(0, response: 0.26), cy = Spring(0, response: 0.30), fade = Spring(0, response: 0.2)
     var orb = Spring(1, response: 0.1), press = Spring(1, response: 0.1)  // orb hover/press; the notch's press dip
     /// False when nothing is drawn or moving: the view's timeline pauses, so an idle app costs no frames.
     @Published var awake = true
@@ -137,13 +137,14 @@ import SwiftUI
         last = now; t += dt
         spin += dt / (reduce ? 4 : 1.4)
         let thinking = state == "thinking"
-        width.target = state == "off" && !open && cy.value < 0.2 ? 0 : tabWidth  // the tab leaves once the card has landed on it
+        // The tab belongs to a session; after a hang-up it stays until the card has landed on it. It never grows for the idle menu.
+        width.target = state != "off" || (width.value > 0.1 && cy.value >= 0.2) ? tabWidth : 0
         width.response = reduce ? 0.15 : state == "off" ? 0.24 : 0.3  // exits faster than it enters
         radius.response = reduce ? 0.25 : thinking ? 0.45 : 0.5
         radius.target = thinking ? 9 : 0
         breath.target = state == "listening" && !reduce ? 1 : 0
         cx.target = open ? 1 : 0; cy.target = cx.target; fade.target = cx.target
-        cx.response = open ? 0.28 : 0.34; cy.response = open ? 0.40 : 0.26  // see cx/cy; retargeting keeps velocity
+        cx.response = open ? 0.26 : 0.34; cy.response = open ? 0.30 : 0.26  // see cx/cy; retargeting keeps velocity
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
         press.target = pressed ? 0.6 : 1
         peek.target = state == "off" && overTab && !open && !reduce ? 1 : 0
@@ -154,7 +155,7 @@ import SwiftUI
 
     /// The rim: a thin light line along the edge of whatever is drawn, so you can see the app is at the notch. It
     /// fades to nothing toward the top of the screen, thinning out along the ears where the shape meets the bezel.
-    static let rimOpacity = 0.5, rimWidth = 1.25, ring = 1.5  // ring: black just outside the idle cutout, to carry the rim
+    static let rimOpacity = 0.35, rimWidth = 1.0, ring = 1.5  // ring: black just outside the idle cutout, to carry the rim
 
     func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
         let h = geo.height, notchX = ear + tabWidth, w = max(width.value, 0), pk = peek.value * press.value
@@ -173,7 +174,7 @@ import SwiftUI
             var idle = hang(l, r, h + 4 * pk + g, 12 + g)
             idle.addPath(ears(l, r, ear))
             ctx.fill(idle, with: .color(.black))
-            outline = outline.isEmpty ? idle : outline.union(idle)
+            outline.addPath(idle)
         }
         var tab = Path()
         if w > 0.1 {
@@ -192,11 +193,11 @@ import SwiftUI
             shape.addPath(hang(notchX, notchX + geo.notchWidth, h * n, 12))
             shape.addPath(ears(notchX, notchX + geo.notchWidth, ear * n))
             ctx.fill(shape, with: .color(.black))
-            outline = outline.isEmpty ? shape : outline.union(shape)
+            outline.addPath(shape)
         }
-        if !outline.isEmpty {  // one outline of everything drawn (the union), so no seams show inside the black
-            let rim = Gradient(stops: [.init(color: .white.opacity(0), location: 0), .init(color: .white.opacity(Notch.rimOpacity), location: 1)])
-            ctx.stroke(outline, with: .linearGradient(rim, startPoint: .zero, endPoint: CGPoint(x: 0, y: h)), lineWidth: Notch.rimWidth)
+        if !outline.isEmpty {  // normalized: one outline of everything drawn, so no seams show inside the black
+            let rim = Gradient(stops: [.init(color: .white.opacity(0), location: 0), .init(color: .white.opacity(Notch.rimOpacity * (reduce ? fade.value : 1)), location: 1)])
+            ctx.stroke(outline.normalized(eoFill: false), with: .linearGradient(rim, startPoint: .zero, endPoint: CGPoint(x: 0, y: h)), lineWidth: Notch.rimWidth)
         }
         guard w > 0.1 else { return }
 

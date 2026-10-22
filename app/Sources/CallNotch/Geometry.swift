@@ -4,6 +4,7 @@ import SwiftUI
 let amber = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
 let tabWidth = 42.0, ear = 10.0, overlap = 12.0  // overlap: black drawn under the notch so its rounded corner fills in
 let cardHeight = 116.0
+let rimPad = 3.0  // room below and right of the shapes for the idle ring and the rim's stroke, else the window clips them
 
 /// Where the notch is on the main screen, and the panel frames built around it. Panel coordinates have y down.
 struct NotchGeometry {
@@ -26,8 +27,8 @@ struct NotchGeometry {
     var cardRight: Double { ear + 2 * tabWidth + notchWidth }  // the card: tab's left edge to a tab past the notch
     var tabRect: CGRect { CGRect(x: 0, y: 0, width: ear + tabWidth, height: height) }
     var notchRect: CGRect { CGRect(x: ear + tabWidth, y: 0, width: notchWidth, height: height) }
-    var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - ear, y: screenTop - height, width: 2 * ear + tabWidth + notchWidth, height: height) }
-    var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight, width: cardRight + ear, height: height + cardHeight) }
+    var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - ear, y: screenTop - height - rimPad, width: 2 * ear + tabWidth + notchWidth + rimPad, height: height + rimPad) }
+    var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight - rimPad, width: cardRight + ear + rimPad, height: height + cardHeight + rimPad) }
 }
 
 /// Recomputed when displays change (main.swift); read on the main thread only.
