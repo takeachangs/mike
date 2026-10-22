@@ -51,6 +51,11 @@ public final class Recorder: @unchecked Sendable {
         }
     }
 
+    /// The model is already in FluidAudio's cache, so the next recording only loads it (seconds) instead of downloading.
+    public static var modelsOnDisk: Bool {
+        AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory(for: .ultra), version: .ultra)
+    }
+
     public static var micDenied: Bool { [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .audio)) }
 
     public let output: URL

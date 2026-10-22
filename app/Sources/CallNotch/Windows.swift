@@ -162,7 +162,7 @@ struct SettingsView: View {
     @AppStorage("soundVolume") private var volume = 0.25
     @State private var loginItem = SMAppService.mainApp.status == .enabled
     @State private var mic = AVCaptureDevice.authorizationStatus(for: .audio)
-    @State private var model: String?
+    @State private var model: String? = Recorder.modelsOnDisk ? "Downloaded" : nil
 
     var body: some View {
         Form {
