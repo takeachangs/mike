@@ -20,7 +20,7 @@ carries {"state", "level", "muted", "pid", "mode"} at 20 Hz for the notch (Mike.
 is launched here if it has been built; its buttons signal this process
 (SIGUSR1 toggles mute, SIGINT hangs up). ~/.mike/context.txt, if present,
 seeds the session as a developer message. The call closes itself after
-IDLE_AFTER seconds with no speech, no audio out and no delegation pending.
+IDLE_AFTER seconds with no transcribed speech, no audio out and no delegation pending (never while muted); one spoken nudge at NUDGE_AT.
 Short cues (the app's cue files, SOUNDS) play quietly at call start, mute and unmute, each
 delegation, its first answer and hang-up; CALL_SOUND_VOLUME (afplay -v,
 default 0.25) sets the level and 0 turns them off.
@@ -58,8 +58,10 @@ SOLO_INSTRUCTIONS = (  # the solo call's whole prompt: no agent behind it, so it
     "something current or personal. When the user says goodbye, say goodbye and end with exactly: Hanging up now."
 )
 SIGN_OFF = "Hanging up now"  # prompt.txt makes the voice end every goodbye with this; hearing it closes the session
-SPEECH_LEVEL = 0.15  # ponytail: mic rms (see rms()) that counts as speech for the idle guard; tune in a real room so typing stays below it
-IDLE_AFTER = 90  # seconds with no speech, no audio out and no pending delegation before the bridge hangs up
+IDLE_AFTER = 60  # seconds with no transcribed speech, no audio out and no pending delegation before the bridge hangs up
+NUDGE_AT = 30  # seconds of that quiet before the voice is asked, once, if the user is still there
+WARN_BEFORE = 10  # the `wait` cue plays this long before the hang-up
+NUDGE = "The user has been quiet for a while. Ask them once, in a few words, whether they are still there."
 CLOSE_WAIT = 5  # seconds to wait for session.closed after closing, so a dead socket cannot hang the exit
 CONTEXT_CAP = 4000  # characters of context.txt sent at start; the server caps the seed at 8,192 tokens
 
@@ -100,9 +102,18 @@ def seed() -> dict:
     return {"input": [{"type": "message", "role": "developer", "content": [{"type": "input_text", "text": text}]}]} if text else {}
 
 
-def is_idle(now: float, active_at: float, spk_at: float, pending: bool) -> bool:
-    """A pending delegation is never idle; otherwise idle once nothing was heard or played for IDLE_AFTER s."""
-    return not pending and now - max(active_at, spk_at) > IDLE_AFTER
+def idle_action(now: float, active_at: float, spk_at: float, pending: bool, muted: bool, done: dict) -> str | None:
+    """"nudge", "warn" or "hangup" once per silence, else None. A pending delegation or a mute never counts as quiet;
+    `done` maps what already fired to when and is cleared when the quiet ends.
+    The nudge's own reply (voice audio after it) does not end the quiet; only a user word, a `say` or a mute does."""
+    quiet = 0 if pending or muted else now - max(active_at, spk_at if spk_at <= done.get("nudge", spk_at) else done["nudge"] - NUDGE_AT)
+    if quiet < NUDGE_AT:
+        done.clear()
+    action = "hangup" if quiet >= IDLE_AFTER else "warn" if quiet >= IDLE_AFTER - WARN_BEFORE else "nudge" if quiet >= NUDGE_AT else None
+    if action is None or action in done:
+        return None
+    done[action] = now
+    return action
 
 
 def write_closed(transcript: list, seconds: float | None) -> None:
@@ -139,8 +150,6 @@ async def call(solo: bool = False) -> None:
 
     def on_mic(indata, frames, t, status):
         live["mic"] = rms(bytes(indata))
-        if live["mic"] > SPEECH_LEVEL:
-            live["active_at"] = time.monotonic()
         loop.call_soon_threadsafe(mic.put_nowait, bytes(indata))
 
     def speaker():
@@ -186,16 +195,26 @@ async def call(solo: bool = False) -> None:
         print("sign-off heard, closing")
         main.cancel()  # same exit as Ctrl-C: close, then wait for session.closed
 
-    async def guard_idle():
+    async def guard_idle(conn):
         # ponytail: a delegation that never gets a `say` keeps the call open; Ctrl-C still ends it
-        while not is_idle(time.monotonic(), live["active_at"], live["spk_at"], bool(pending)):
+        done: dict[str, float] = {}
+        while True:
             await asyncio.sleep(1)
-        print(f"idle for {IDLE_AFTER} s (no speech, no audio, nothing pending), closing")
-        main.cancel()
+            action = idle_action(time.monotonic(), live["active_at"], live["spk_at"], bool(pending), live["muted"], done)
+            if action == "nudge":
+                print(f"quiet for {NUDGE_AT} s, nudging")
+                await conn.session.commentary.append(content=NUDGE, delegation_id=None)
+            elif action == "warn":
+                cue("wait")
+            elif action == "hangup":
+                print(f"idle for {IDLE_AFTER} s (no speech, no audio, nothing pending), closing")
+                main.cancel()
+                return
 
     async def toggle_mute(conn):  # SIGUSR1 from the notch app's mute button; SIGINT from its hang-up button is plain Ctrl-C
         await (conn.session.input_audio.unmute() if live["muted"] else conn.session.input_audio.mute())
         live["muted"] = not live["muted"]
+        live["active_at"] = time.monotonic()  # the quiet clock restarts on unmute
         cue("pause" if live["muted"] else "start")
         print("mic muted" if live["muted"] else "mic live")
 
@@ -227,11 +246,12 @@ async def call(solo: bool = False) -> None:
                             notch = subprocess.Popen([NOTCH_APP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                                      env={**os.environ, "CALL_BRIDGE_PID": str(os.getpid())})  # its buttons signal us
                         loop.add_signal_handler(signal.SIGUSR1, lambda: asyncio.create_task(toggle_mute(conn)))
-                        tasks = [asyncio.create_task(f(conn)) for f in (pump_mic, pump_outbox)] + [asyncio.create_task(f()) for f in (pump_state, guard_idle)]
+                        tasks = [asyncio.create_task(f(conn)) for f in (pump_mic, pump_outbox, guard_idle)] + [asyncio.create_task(pump_state())]
                     elif t == "session.output_audio.delta":
                         spk.put(base64.b64decode(ev.delta))
                     elif t == "session.input_transcript.delta":
                         add("user", ev.delta)
+                        live["active_at"] = time.monotonic()  # the server heard words: real speech, not noise
                     elif t == "session.output_transcript.delta":
                         add("assistant", ev.delta)
                         if SIGN_OFF in transcript[-1][1] and not any(x.get_name() == "hangup" for x in tasks):
@@ -291,8 +311,20 @@ def selftest() -> None:
     assert seed() == {}
     (STATE / "context.txt").write_text("y" * 5000)
     assert seed()["input"] == [{"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "y" * CONTEXT_CAP}]}]
-    assert not is_idle(100, 50, 0, False) and is_idle(200, 50, 100, False) and not is_idle(200, 50, 150, False)
-    assert not is_idle(1000, 0, 0, True)  # a pending delegation is never idle
+    done: dict[str, float] = {}  # idle_action on a fake clock; speech at t=100
+    acts = [idle_action(t, 100, 0, False, False, done) for t in (110, 129, 130, 131, 149, 150, 151, 159, 160, 161)]
+    assert acts == [None, None, "nudge", None, None, "warn", None, None, "hangup", None], acts
+    assert idle_action(200, 190, 0, False, False, done) is None and not done  # speech resets: the next silence nudges again
+    assert idle_action(220, 190, 0, False, False, done) == "nudge"
+    assert idle_action(250, 190, 215, False, False, done) is None  # voice audio at 215 resets the clock too
+    done.clear()  # the nudge's own reply (voice audio at 131-133) must not reset the clocks
+    nudges = [idle_action(t, 100, spk, False, False, done) for t, spk in ((130, 0), (132, 131), (133, 132), (140, 133), (149, 133), (150, 133), (159, 133), (160, 133))]
+    assert nudges == ["nudge", None, None, None, None, "warn", None, "hangup"], nudges
+    done.clear()
+    done = {}  # voice reply ran to 120 before the quiet: the nudge at 150 still gives a full 30 s to answer
+    late = [idle_action(t, 100, spk, False, False, done) for t, spk in ((150, 120), (152, 151), (159, 151), (170, 151), (180, 151))]
+    assert late == ["nudge", None, None, "warn", "hangup"], late
+    assert idle_action(1000, 0, 0, True, False, done) is None and idle_action(1000, 0, 0, False, True, done) is None  # pending or muted
     write_closed([["user", "bye"]], 42.5)
     assert json.loads(INBOX.read_text().splitlines()[-1]) == {"event": "closed", "seconds": 42.5, "transcript": [["user", "bye"]]}
     assert json.loads(next(STATE.glob("transcript-*.json")).read_text())["seconds"] == 42.5
