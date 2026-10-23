@@ -14,9 +14,9 @@ func render(_ px: Int) -> Data {
         }
         body.close()
         NSGradient(starting: NSColor(white: 0.16, alpha: 1), ending: NSColor(white: 0.04, alpha: 1))!.draw(in: body, angle: -90)
-        // The m: the same seven dots the notch shows (Notch.mShape, y down there), 7 units = 21 % of the icon.
+        // The m: the notch's seven dots (Notch.mShape, y down there) centred exactly, 7 units = 21 % of the icon.
         let unit = s * 0.03, d = s * 0.095
-        for (x, y) in [(-7.0, 4.0), (-7.0, -1.5), (-3.5, -5.5), (0.0, -1.0), (3.5, -5.5), (7.0, -1.5), (7.0, 4.0)] {
+        for (x, y) in [(-7.0, 4.75), (-7.0, -0.75), (-3.5, -4.75), (0.0, -0.25), (3.5, -4.75), (7.0, -0.75), (7.0, 4.75)] {
             let c = CGPoint(x: s / 2 + CGFloat(x) * unit, y: s / 2 - CGFloat(y) * unit)
             NSColor.white.setFill()
             NSBezierPath(ovalIn: NSRect(x: c.x - d / 2, y: c.y - d / 2, width: d, height: d)).fill()
