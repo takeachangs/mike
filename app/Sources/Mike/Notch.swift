@@ -182,7 +182,7 @@ import SwiftUI
         guard w > 0.1 else { return }
 
         // The indicator: seven white dots in a 24-pt box 8 pt before the notch, vertically centred, fading in as the tab
-        // uncovers it. At rest they are the M (3-1-3 on a 3x3 grid, pitch 7), opening into the circle while the card is open. Waiting, they run the morph cycle: the M
+        // uncovers it. At rest they are the m (two arches on flat feet), opening into the circle while the card is open. Waiting, they run the morph cycle: the M
         // expands into a circle, which unfolds by quarter turns, then gathers back into the M (4.8 s, 5 % holds, 20 %
         // glides). Speaking, the circle keeps unfolding. Listening, the M brightens and swells with the level; paused
         // or muted, it dims with the centre lit. `morph` glides between the resting M and the cycle on state changes.
@@ -206,13 +206,13 @@ import SwiftUI
         }
     }
 
-    /// The M: left column top to bottom, the centre, right column top to bottom (y down). The top row sits closer to the
-    /// middle one than the bottom does, so it reads as a letter rather than a grid.
-    static let mShape: [(Double, Double)] = [(-7, -4.5), (-7, 0), (-7, 7), (0, 0.5), (7, -4.5), (7, 0), (7, 7)]
-    /// The circle of 7, turned by `turn`: each M dot takes the slot nearest its own angle (the centre takes the top),
-    /// so the glide between them expands outward instead of crossing.
+    /// The m: two arches on flat feet, in order left foot, left shoulder, left top, the valley, right top, right
+    /// shoulder, right foot (y down). The feet sit a little closer to the shoulders than the tops do.
+    static let mShape: [(Double, Double)] = [(-7, 4.75), (-7, -0.75), (-3.5, -4.75), (0, -0.25), (3.5, -4.75), (7, -0.75), (7, 4.75)]
+    /// The circle of 7, turned by `turn`: each dot takes the slot nearest its own angle (the valley takes the top), so
+    /// the glide between them expands outward instead of crossing.
     static func circle(_ turn: Double) -> [(Double, Double)] {
-        [6, 5, 4, 0, 1, 2, 3].map { let a = Double($0) / 7 * 2 * .pi - .pi / 2 + turn; return (cos(a) * 7, sin(a) * 7) }
+        [4, 5, 6, 0, 1, 2, 3].map { let a = Double($0) / 7 * 2 * .pi - .pi / 2 + turn; return (cos(a) * 7, sin(a) * 7) }
     }
     static let morphing = [mShape, circle(0), circle(.pi / 2), circle(.pi)]
     static let unfolding = [circle(0), circle(.pi / 2), circle(.pi), circle(.pi * 1.5)]
