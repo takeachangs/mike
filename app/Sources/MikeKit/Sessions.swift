@@ -56,3 +56,9 @@ public struct Session: Identifiable, Sendable {
         if FileManager.default.fileExists(atPath: notes.path) { try FileManager.default.trashItem(at: notes, resultingItemURL: nil) }
     }
 }
+
+// ponytail: GPT-Live price per minute, hand-copied; it will drift from OpenAI pricing.
+public let callDollarsPerMinute = 0.05
+
+/// The running cost of a call after `seconds`, like "$0.21".
+public func callCost(seconds: Int) -> String { String(format: "$%.2f", Double(seconds) * callDollarsPerMinute / 60) }

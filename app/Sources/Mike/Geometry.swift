@@ -3,7 +3,7 @@ import SwiftUI
 
 let amber = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
 let tabWidth = 42.0, margin = 10.0, overlap = 12.0  // margin: panel room left of the tab; overlap: black under the notch so its corner fills in
-let cardHeight = 116.0, idleCardHeight = 80.0  // the session card; the idle one, just the row of actions
+let cardHeight = 132.0, idleCardHeight = 80.0  // the session card; the idle one, just the row of actions
 
 /// Where the notch is on the main screen, and the panel frames built around it. Panel coordinates have y down.
 struct NotchGeometry {

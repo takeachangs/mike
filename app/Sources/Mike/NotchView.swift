@@ -1,4 +1,5 @@
 import AppKit
+import MikeKit
 import SwiftUI
 
 struct NotchView: View {
@@ -64,6 +65,7 @@ struct NotchView: View {
             reveal(label(status, alert: m.notice != nil), after: 0.08)
             reveal(Text(s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%02d:%02d", s / 60, s % 60)).font(.system(size: 26, weight: .medium)).monospacedDigit()
                 .tracking(-0.26).frame(height: 26), after: 0.08)
+            if !recorder { reveal(Text(callCost(seconds: s)).font(.system(size: 12)).monospacedDigit().foregroundStyle(.white.opacity(0.5)), after: 0.08) }
             reveal(HStack(spacing: 16) {
                 mute(now)
                 Button { m.signalSession(SIGINT); m.setOpen(false) } label: { Image(systemName: recorder ? "stop.fill" : "phone.down.fill") }
