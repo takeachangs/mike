@@ -62,3 +62,8 @@ import Testing
         #expect(Session.load(from: dir).map(\.kind) == [.recording, .call])
     }
 }
+
+@Test func callCostFormats() {
+    #expect(callCost(seconds: 0) == "$0.00")
+    #expect(callCost(seconds: 250) == "$0.21")
+}
