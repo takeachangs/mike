@@ -3,7 +3,6 @@
 <p align="center">Calls, lectures and a library — living in your notch</p>
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple&logoColor=white" alt="macOS 14+">
-  <img src="https://img.shields.io/badge/localized-English-black" alt="Localized in English">
 </p>
 
 Click the notch to:
