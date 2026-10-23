@@ -16,6 +16,7 @@ import SwiftUI
     var launching = false, cancelled = false, stopping = false  // their lifecycle, see Launch.swift
     var width = Spring(0, response: 0.3), morph = Spring(0, response: 0.3)  // morph: the dots, 0 = at rest as the M, 1 = on their cycle
     var depth = Spring(cardHeight, response: 0.3)  // the card's height: short for the idle actions, full for a session or a notice
+    var round = Spring(0, response: 0.3)  // the resting dots: 0 = the M, 1 = the circle, which they become while the card is open
     var reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     var open = false, hovered = false, overTab = false, pressed = false, quitting = false, outSince: Date?
     // The card morphs out of the notch on two springs, width (cx) and height (cy), 0 = the closed shape, 1 = the card:
@@ -113,7 +114,7 @@ import SwiftUI
         func still(_ s: Spring) -> Bool { abs(s.value - s.target) < 0.001 && abs(s.velocity) < 0.01 }
         retarget()  // before the stillness check, or a spring whose target just moved (pointer left) pauses the timeline a poll
         wake(state != "off" || open || pressed || overTab || starting != nil
-             || ![cx, cy, fade, width, orb, morph, depth].allSatisfy(still))
+             || ![cx, cy, fade, width, orb, morph, depth, round].allSatisfy(still))
         if state != "off" || resident { offSince = nil; return }
         offSince = offSince ?? now
         if now.timeIntervalSince(offSince!) > 3 { NSApp.terminate(nil) }
@@ -143,6 +144,7 @@ import SwiftUI
         width.response = reduce ? 0.15 : state == "off" ? 0.24 : 0.3  // exits faster than it enters
         morph.target = (thinking || state == "speaking") && !muted && !reduce ? 1 : 0  // the dots cycle while waiting or speaking
         depth.target = cardDepth
+        round.target = open && !reduce ? 1 : 0
         cx.target = open ? 1 : 0; cy.target = cx.target; fade.target = cx.target
         cx.response = open ? 0.26 : 0.34; cy.response = open ? 0.30 : 0.26  // see cx/cy; retargeting keeps velocity
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
@@ -152,7 +154,7 @@ import SwiftUI
         let dt = min(0.05, last.map { now.timeIntervalSince($0) } ?? 0)
         last = now; t += dt
         retarget()
-        width.step(dt); morph.step(dt); depth.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt)
+        width.step(dt); morph.step(dt); depth.step(dt); round.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt)
         let goal = state == "thinking" || state == "off" ? 0 : target
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }
@@ -180,7 +182,7 @@ import SwiftUI
         guard w > 0.1 else { return }
 
         // The indicator: seven white dots in a 24-pt box 8 pt before the notch, vertically centred, fading in as the tab
-        // uncovers it. At rest they are the M (3-1-3 on a 3x3 grid, pitch 7). Waiting, they run the morph cycle: the M
+        // uncovers it. At rest they are the M (3-1-3 on a 3x3 grid, pitch 7), opening into the circle while the card is open. Waiting, they run the morph cycle: the M
         // expands into a circle, which unfolds by quarter turns, then gathers back into the M (4.8 s, 5 % holds, 20 %
         // glides). Speaking, the circle keeps unfolding. Listening, the M brightens and swells with the level; paused
         // or muted, it dims with the centre lit. `morph` glides between the resting M and the cycle on state changes.
@@ -191,10 +193,12 @@ import SwiftUI
         dots.translateBy(x: notchX - 8 - 12, y: h / 2)
         let k = (0.9 + 0.1 * presence) * orb.value
         dots.scaleBy(x: k, y: k)
-        let speaking = state == "speaking", m = min(max(morph.value, 0), 1)
+        let speaking = state == "speaking", m = min(max(morph.value, 0), 1), o = min(max(round.value, 0), 1)
         let cycle = Notch.pose(speaking ? Notch.unfolding : Notch.morphing, at: (t / 4.8).truncatingRemainder(dividingBy: 1))
         for i in 0..<7 {
-            let r = Notch.mShape[i], c = cycle[i], x = r.0 + (c.0 - r.0) * m, y = r.1 + (c.1 - r.1) * m
+            let rm = Notch.mShape[i], rc = Notch.circle(0)[i], c = cycle[i]
+            let r = (rm.0 + (rc.0 - rm.0) * o, rm.1 + (rc.1 - rm.1) * o)  // at rest: the M, or the circle while open
+            let x = r.0 + (c.0 - r.0) * m, y = r.1 + (c.1 - r.1) * m
             let listening = state == "listening" && !muted
             let a = muted ? (i == 3 ? 1 : 0.35) : listening ? 0.6 + 0.4 * level : 1
             let d = 3 * (listening && !reduce ? 1 + 0.3 * level : 1)
