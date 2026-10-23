@@ -68,6 +68,6 @@ To try it without a call: `python3 ~/projects/mike/app/scripts/drive.py` (after 
 ## Notes
 
 - `~/.mike/` holds runtime state: `context.txt`, inbox, outbox, `state.json`, each call's transcript, and `board/`.
-- `prompt.txt` in the repo is the voice prompt. Edit it there; the bridge reads it at start.
+- `prompt.txt` in the repo is the generic voice prompt; a personal copy at `~/.mike/prompt.txt` takes precedence. The bridge reads it at start.
 - The OpenAI key comes from `OPENAI_API_KEY` in the shell. Never copy it anywhere.
 - Each call costs OpenAI credits per minute. Do not start one without being asked.

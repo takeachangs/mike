@@ -51,7 +51,9 @@ def volume(raw: str) -> float:
 
 VOLUME = volume(os.environ.get("CALL_SOUND_VOLUME", "0.25"))  # quiet by default, 0 turns the cues off
 RATE = 24000
-INSTRUCTIONS = (Path(__file__).resolve().parent / "prompt.txt").read_text()
+# a personal prompt lives in ~/.mike, the repo copy stays generic
+_PERSONAL_PROMPT = Path.home() / ".mike" / "prompt.txt"
+INSTRUCTIONS = (_PERSONAL_PROMPT if _PERSONAL_PROMPT.exists() else Path(__file__).resolve().parent / "prompt.txt").read_text()
 SOLO_INSTRUCTIONS = (  # the solo call's whole prompt: no agent behind it, so it must not promise to look things up
     "You are a friendly, concise voice assistant on the user's Mac. Answer from your own knowledge in short spoken "
     "sentences. You have no tools, no internet and no access to the user's files, so say so plainly when asked for "
