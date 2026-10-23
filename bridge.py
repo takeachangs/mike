@@ -62,6 +62,7 @@ IDLE_AFTER = 60  # seconds with no transcribed speech, no audio out and no pendi
 NUDGE_AT = 30  # seconds of that quiet before the voice is asked, once, if the user is still there
 WARN_BEFORE = 10  # the `wait` cue plays this long before the hang-up
 NUDGE = "The user has been quiet for a while. Ask them once, in a few words, whether they are still there."
+CALLING_ABOUT = "Calling about:"  # first line of context.txt when the agent placed the call; the /call skill writes it
 CLOSE_WAIT = 5  # seconds to wait for session.closed after closing, so a dead socket cannot hang the exit
 CONTEXT_CAP = 4000  # characters of context.txt sent at start; the server caps the seed at 8,192 tokens
 
@@ -95,10 +96,21 @@ def write_inbox(obj: dict) -> None:
         f.write(json.dumps(obj) + "\n")
 
 
+def context() -> str:
+    f = STATE / "context.txt"
+    return f.read_text()[:CONTEXT_CAP].strip() if f.exists() else ""
+
+
+def opener(text: str) -> str | None:
+    """What the voice is told to open with when the agent placed the call (context's first line `Calling about: <reason>`), else None."""
+    first = text.split("\n", 1)[0]
+    reason = first[len(CALLING_ABOUT):].strip() if first.startswith(CALLING_ABOUT) else ""
+    return f"You placed this call. Open by saying in a few words why you are calling: {reason}." if reason else None
+
+
 def seed() -> dict:
     """session.start fields seeding context.txt as a developer message; {} when there is no file."""
-    f = STATE / "context.txt"
-    text = f.read_text()[:CONTEXT_CAP].strip() if f.exists() else ""
+    text = context()
     return {"input": [{"type": "message", "role": "developer", "content": [{"type": "input_text", "text": text}]}]} if text else {}
 
 
@@ -246,6 +258,8 @@ async def call(solo: bool = False) -> None:
                             notch = subprocess.Popen([NOTCH_APP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                                      env={**os.environ, "CALL_BRIDGE_PID": str(os.getpid())})  # its buttons signal us
                         loop.add_signal_handler(signal.SIGUSR1, lambda: asyncio.create_task(toggle_mute(conn)))
+                        if not solo and (line := opener(context())):
+                            await conn.session.commentary.append(content=line, delegation_id=None)  # the voice speaks first
                         tasks = [asyncio.create_task(f(conn)) for f in (pump_mic, pump_outbox, guard_idle)] + [asyncio.create_task(pump_state())]
                     elif t == "session.output_audio.delta":
                         spk.put(base64.b64decode(ev.delta))
@@ -311,6 +325,9 @@ def selftest() -> None:
     assert seed() == {}
     (STATE / "context.txt").write_text("y" * 5000)
     assert seed()["input"] == [{"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "y" * CONTEXT_CAP}]}]
+    assert opener("") is None and opener("Working on step 3.\nCalling about: x") is None  # no line, empty, not first
+    assert opener("Calling about: the proof in step three\nmore") == "You placed this call. Open by saying in a few words why you are calling: the proof in step three."
+    assert opener("Calling about:  \nmore") is None
     done: dict[str, float] = {}  # idle_action on a fake clock; speech at t=100
     acts = [idle_action(t, 100, 0, False, False, done) for t in (110, 129, 130, 131, 149, 150, 151, 159, 160, 161)]
     assert acts == [None, None, "nudge", None, None, "warn", None, None, "hangup", None], acts

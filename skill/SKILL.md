@@ -7,9 +7,13 @@ description: Start a voice call where GPT-Live handles the mic and speaker and t
 
 The tool lives in `~/projects/mike`: `bridge.py` runs the OpenAI Live session on the mic and speaker with the voice prompt from `prompt.txt`, and Mike.app (from `app/`) is the notch. Every question the voice cannot answer itself becomes a delegation line in `~/.mike/inbox.jsonl`. You answer each one from the notes folder and hand the text back with `bridge.py say`.
 
+## Offering a call
+
+Offer a call in text only when the chat would go better by voice: a long back-and-forth, or something better walked through out loud (a derivation, a design discussion). Ask once, in a line ("want to call about this?"). Never offer more than once per chat, and treat a "no" as final. Start nothing without an explicit yes: a call bills per second and opens the mic. On yes, do the steps below, and write the `Calling about:` line in step 1.
+
 ## Steps
 
-1. Write `~/.mike/context.txt` so the voice knows what this chat is working on. A few plain sentences on the current task (what is open, which step you reached), then any short dated facts the voice may answer without asking you, under this exact heading:
+1. Write `~/.mike/context.txt` so the voice knows what this chat is working on. If you are placing the call (the person said yes to your offer, rather than typing `/call`), make the first line `Calling about: <one short reason>`; the voice then opens by saying it. When the person started the call, leave that line out and the voice stays quiet until spoken to. Then a few plain sentences on the current task (what is open, which step you reached), then any short dated facts the voice may answer without asking you, under this exact heading:
 
    ```
    Dates you may answer directly:
