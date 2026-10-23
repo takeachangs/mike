@@ -8,21 +8,21 @@ import SwiftUI
     let resident: Bool, envPID: pid_t?
     weak var panel: NSPanel?
     var state = "off", target = 0.0, level = 0.0, hangUp = false, muted = false, mutedAt = Date.distantPast
-    var t = 0.0, spin = 0.0, last: Date?, offSince: Date?
+    var t = 0.0, last: Date?, offSince: Date?
     var pid: pid_t?, recorderMode: Bool, since = Date(), live = false  // the session's, from the state file
     var starting: Date?, progress: Double?  // a session this app is starting: model download / load, or connecting
     var notice: String?, noticeUntil = Date.distantPast
     var recorder: Recorder?, call: LiveCall?  // sessions running inside this app
     var launching = false, cancelled = false, stopping = false  // their lifecycle, see Launch.swift
     var peek = Spring(0, response: 0.2)  // resident and idle: the notch swells a little under the pointer
-    var width = Spring(0, response: 0.3), radius = Spring(0, response: 0.45), breath = Spring(0, response: 0.5)
+    var width = Spring(0, response: 0.3), grid = Spring(0, response: 0.3)  // grid: the indicator, 1 = lattice, 0 = ring
     var reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     var open = false, hovered = false, overTab = false, pressed = false, outSince: Date?
     // The card morphs out of the notch on two springs, width (cx) and height (cy), 0 = the closed shape, 1 = the card:
     // opening leads with width (the notch widens, then drops), closing leads with height (it ends as a notch-tall pill
     // narrowing into the cutout). Responses are set per direction in step(). Reduce Motion cross-fades instead (fade).
     var cx = Spring(0, response: 0.26), cy = Spring(0, response: 0.30), fade = Spring(0, response: 0.2)
-    var orb = Spring(1, response: 0.1), press = Spring(1, response: 0.1)  // orb hover/press; the notch's press dip
+    var orb = Spring(1, response: 0.1), press = Spring(1, response: 0.1)  // indicator hover/press; the notch's press dip
     /// False when nothing is drawn or moving: the view's timeline pauses, so an idle app costs no frames.
     @Published var awake = true
 
@@ -111,7 +111,7 @@ import SwiftUI
         func still(_ s: Spring) -> Bool { abs(s.value - s.target) < 0.001 && abs(s.velocity) < 0.01 }
         retarget()  // before the stillness check, or a spring whose target just moved (pointer left) pauses the timeline a poll
         wake(state != "off" || open || pressed || overTab || starting != nil
-             || ![cx, cy, fade, peek, width, press, orb].allSatisfy(still))
+             || ![cx, cy, fade, peek, width, press, orb, grid].allSatisfy(still))
         if state != "off" || resident { offSince = nil; return }
         offSince = offSince ?? now
         if now.timeIntervalSince(offSince!) > 3 { NSApp.terminate(nil) }
@@ -138,9 +138,7 @@ import SwiftUI
         // The tab belongs to a session; after a hang-up it stays until the card has landed on it. It never grows for the idle menu.
         width.target = state != "off" || (width.value > 0.1 && cy.value >= 0.2) ? tabWidth : 0
         width.response = reduce ? 0.15 : state == "off" ? 0.24 : 0.3  // exits faster than it enters
-        radius.response = reduce ? 0.25 : thinking ? 0.45 : 0.5
-        radius.target = thinking ? 9 : 0
-        breath.target = state == "listening" && !reduce ? 1 : 0
+        grid.target = thinking || (muted && state != "speaking") ? 1 : 0  // lattice while waiting or paused, else the ring
         cx.target = open ? 1 : 0; cy.target = cx.target; fade.target = cx.target
         cx.response = open ? 0.26 : 0.34; cy.response = open ? 0.30 : 0.26  // see cx/cy; retargeting keeps velocity
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
@@ -151,9 +149,8 @@ import SwiftUI
     func step(_ now: Date) {
         let dt = min(0.05, last.map { now.timeIntervalSince($0) } ?? 0)
         last = now; t += dt
-        spin += dt / (reduce ? 4 : 1.4)
         retarget()
-        width.step(dt); radius.step(dt); breath.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); peek.step(dt); press.step(dt)
+        width.step(dt); grid.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); peek.step(dt); press.step(dt)
         let goal = state == "thinking" || state == "off" ? 0 : target
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }
@@ -183,25 +180,49 @@ import SwiftUI
         }
         guard w > 0.1 else { return }
 
-        // Orb: 24-pt box, 8 pt before the notch, vertically centred. Fades in as the tab uncovers it.
-        let presence = min(max((w - 12) / 30, 0), 1)
-        let core = 1 + 0.75 * level + 0.08 * breath.value * (1 - cos(2 * .pi * t / 2.8)) / 2
-        let rad = radius.value, sat = 0.85 + 0.15 * min(max(rad / 9, 0), 1)
-        var orb = ctx
-        orb.clip(to: tab)
-        orb.opacity = presence
-        orb.addFilter(.alphaThreshold(min: 0.5, color: amber))  // metaball: blur, then cut at half alpha
-        orb.addFilter(.blur(radius: 1.5))
-        orb.drawLayer { l in
-            l.translateBy(x: notchX - 8 - 12, y: h / 2)
-            l.scaleBy(x: (0.9 + 0.1 * presence) * self.orb.value, y: (0.9 + 0.1 * presence) * self.orb.value)
-            func ball(_ x: Double, _ y: Double, _ d: Double) {
-                l.fill(Path(ellipseIn: CGRect(x: x - d / 2, y: y - d / 2, width: d, height: d)), with: .color(.white))
+        // The indicator: white dots in a 24-pt box 8 pt before the notch, vertically centred, fading in as the tab
+        // uncovers it. A 3x3 lattice while waiting (a ripple from the centre, 1.7 s) or paused (the centre dot steady);
+        // a ring of 8 while the mic is open (the dots brighten and swell with the level over a slow pulse) or the
+        // voice speaks (a comet runs round, 1.8 s). The two cross-fade on `grid`. Reduce Motion: nothing moves.
+        let presence = min(max((w - 12) / 30, 0), 1), rest = 0.2
+        var dots = ctx
+        dots.clip(to: tab)
+        dots.opacity = presence
+        dots.translateBy(x: notchX - 8 - 12, y: h / 2)
+        let k = (0.9 + 0.1 * presence) * orb.value
+        dots.scaleBy(x: k, y: k)
+        func dot(_ x: Double, _ y: Double, _ d: Double, _ a: Double) {
+            guard a > 0.001 else { return }
+            dots.fill(Path(ellipseIn: CGRect(x: x - d / 2, y: y - d / 2, width: d, height: d)), with: .color(.white.opacity(a)))
+        }
+        func wrap(_ u: Double) -> Double { u - floor(u) }
+        let g = min(max(grid.value, 0), 1)
+        if g > 0.001 {  // lattice: pitch 7, dots 3.5
+            for row in -1...1 {
+                for col in -1...1 {
+                    var lit = row == 0 && col == 0 ? 1.0 : 0.0  // at rest, and under Reduce Motion: the centre
+                    if state == "thinking" && !reduce {
+                        let delay = hypot(Double(col), Double(row)) * 0.7 - (row == 0 && col == 0 ? 0.18 : 0)
+                        let u = wrap((t - delay) / 1.7)
+                        lit = u < 0.28 ? cssEase(u / 0.28, 0.66, 0, 0.34, 1) : u < 0.56 ? 1 - cssEase((u - 0.28) / 0.28, 0.66, 0, 0.34, 1) : 0
+                    }
+                    dot(Double(col) * 7, Double(row) * 7, 3.5 * (1 + 0.18 * lit), g * (rest + (1 - rest) * lit))
+                }
             }
-            ball(0, 0, 6 * core)
-            for lag in [0.0, 0.5] {  // second satellite half a revolution (0.7 s) behind
-                let u = spin - lag, a = 2 * .pi * (floor(u) + cssEase(u - floor(u)))
-                ball(rad * cos(a), rad * sin(a), 6 * sat)
+        }
+        if g < 0.999 {  // ring: 8 dots on radius 8, dots 3
+            let speaking = state == "speaking"
+            for i in 0..<8 {
+                let a = Double(i) / 8 * 2 * .pi, lit: Double
+                if reduce {
+                    lit = 0.7
+                } else if speaking {
+                    let u = wrap(t / 1.8 - Double(i) / 8)
+                    lit = u < 0.12 ? 0.08 + 0.92 * u / 0.12 : u < 0.35 ? 1 - 0.5 * (u - 0.12) / 0.23 : u < 0.6 ? 0.5 - 0.38 * (u - 0.35) / 0.25 : 0.12 - 0.04 * (u - 0.6) / 0.4
+                } else {
+                    lit = max(0.35 * (1 - cos(2 * .pi * (t / 2 - Double(i) / 8))) / 2, level)
+                }
+                dot(8 * cos(a), 8 * sin(a), 3 * (speaking || reduce ? 1 : 0.9 + 0.25 * level), (1 - g) * (rest + (1 - rest) * lit))
             }
         }
     }

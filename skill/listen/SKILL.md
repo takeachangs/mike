@@ -5,7 +5,7 @@ description: Transcribe a lecture or meeting live on this Mac (on-device, nothin
 
 # /listen — live on-device transcript, this session writes the notes
 
-The recorder is the `Listen` command inside Mike.app (built from `~/projects/mike/app`). It transcribes the microphone with Parakeet Ultra on the Neural Engine and keeps a transcript with one paragraph per clock minute (`14:05 Alright, so today…`). No audio is saved, and nothing leaves the Mac while it listens. If the notch app is built, it shows the recording like a call: clicking the orb opens a card that reads Recording or Paused, with a timer, a pause button and a stop button.
+The recorder is the `Listen` command inside Mike.app (built from `~/projects/mike/app`). It transcribes the microphone with Parakeet Ultra on the Neural Engine and keeps a transcript with one paragraph per clock minute (`14:05 Alright, so today…`). No audio is saved, and nothing leaves the Mac while it listens. If the notch app is built, it shows the recording like a call: clicking the dots opens a card that reads Recording or Paused, with a timer, a pause button and a stop button.
 
 ## Steps
 

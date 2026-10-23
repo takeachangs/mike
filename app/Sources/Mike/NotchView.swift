@@ -10,7 +10,7 @@ struct NotchView: View {
             // each frame and SwiftUI skips the redraw. The content's clip below reads the springs a frame behind, unseen.
             Canvas { ctx, size in m.step(tl.date); m.draw(&ctx, size) }
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)  // the orb shrinks on pointer-down; release over the tab toggles the card
+            .gesture(DragGesture(minimumDistance: 0)  // the indicator shrinks on pointer-down; release over the tab toggles the card
                 .onChanged { g in m.pressed = m.clickable(g.startLocation) }
                 .onEnded { g in if m.pressed && m.clickable(g.location) { m.setOpen(!m.open) }; m.pressed = false })
             .overlay(alignment: .topLeading) {  // overlay: never resizes the root
