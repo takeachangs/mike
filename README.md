@@ -22,6 +22,16 @@ recording, with the same notch showing the session.
 
 Requires macOS 14 or later on Apple Silicon.
 
+Download `Mike-<version>.dmg` from the [latest release](https://github.com/takeachangs/mike/releases/latest)
+and drag Mike to Applications. The app is not yet notarized, so macOS blocks the first launch; clear the download
+flag once and it opens normally:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Mike.app
+```
+
+Or build it yourself, which needs no such step:
+
 ```bash
 cd app && scripts/build-app.sh          # builds and signs dist/Mike.app (ad-hoc unless SIGN_IDENTITY is set)
 scripts/install.sh --open               # quits a running copy, replaces /Applications/Mike.app, opens it
@@ -64,7 +74,8 @@ python3 scripts/drive.py                # cycle the notch through call states wi
 
 Releases: `SIGN_IDENTITY="Developer ID Application: …" NOTARY_PROFILE=<profile> scripts/build-app.sh`
 signs with the hardened runtime, notarizes and staples. CI (`.github/workflows/ci.yml`) runs the tests and
-builds the app on pull requests and pushes to main; pushing a `v*` tag attaches the zip to a GitHub release.
+builds the app on pull requests and pushes to main; `scripts/release.sh 1.0.1` tags a release, and CI publishes the zip
+and DMG with notes listing every commit since the previous release.
 
 ## Agent mode
 

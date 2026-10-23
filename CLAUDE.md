@@ -24,7 +24,7 @@ app/scripts/                         build-app.sh (bundle, sign, notarize, zip),
 bridge.py                            agent-mode call: Live session, audio, inbox/outbox, state file, notch launch (single file, uv inline deps)
 prompt.txt                           the agent-mode voice prompt, read once at bridge start; personalised for its owner
 skill/SKILL.md, skill/listen/SKILL.md  generic copies of the agent-side /call and /listen procedures, installed into a notes folder
-.github/workflows/ci.yml             tests and an app build on pull requests and pushes to main; a v* tag publishes the zip as a release
+.github/workflows/ci.yml             tests and an app build on pull requests and pushes to main; a v* tag (app/scripts/release.sh) publishes the zip and DMG as a release with commit-list notes
 ```
 
 Runtime state lives outside the repo in `~/.mike/`: `state.json`, `app.pid`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), `listen-<stamp>.txt` per recording (paragraphs starting `HH:MM `) with the agent's `listen-<stamp>.md` notes beside it, and for agent mode `context.txt`, `inbox.jsonl`, `outbox.jsonl` and `board/`. Settings (sound volume, onboarded) are in the app's UserDefaults; the OpenAI key is in the login Keychain (`com.takeachangs.mike`).

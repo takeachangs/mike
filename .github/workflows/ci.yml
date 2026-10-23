@@ -67,13 +67,19 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Mike
-          path: app/dist/*.zip
+          path: |
+            app/dist/*.zip
+            app/dist/*.dmg
 
+      # Release notes: every commit since the previous tag, then GitHub's own section (pull requests, compare link).
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" app/dist/*.zip --title "Mike $GITHUB_REF_NAME" --generate-notes
+        run: |
+          prev=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          { echo "## Changes"; git log --no-merges --format='- %s' ${prev:+$prev..}HEAD; } > notes.md
+          gh release create "$GITHUB_REF_NAME" app/dist/*.zip app/dist/*.dmg --title "Mike $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
 
 permissions:
   contents: write  # for the release on tags

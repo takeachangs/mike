@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds dist/Mike.app and dist/Mike-<version>.zip from app/. Apple Silicon only (the speech model runs on
+# Builds dist/Mike.app, dist/Mike-<version>.zip and .dmg from app/. Apple Silicon only (the speech model runs on
 # the Neural Engine).
 #   SIGN_IDENTITY="Developer ID Application: Name (TEAMID)"  sign for distribution with the hardened runtime
 #                                                             (default: ad-hoc, which runs only on this Mac)
@@ -40,4 +40,13 @@ if [ -n "${NOTARY_PROFILE:-}" ]; then
     xcrun stapler staple "$APP"
     rm "$ZIP" && ditto -c -k --keepParent "$APP" "$ZIP"  # re-zip so the download carries the stapled ticket
 fi
-echo "built $APP ($VERSION, build $BUILD, signed: $IDENTITY) and $ZIP"
+
+# The DMG: the app beside an Applications link, nothing else (no background art; hdiutil ships with macOS).
+DMG="dist/Mike-$VERSION.dmg"; STAGE=$(mktemp -d)
+cp -R "$APP" "$STAGE/" && ln -s /Applications "$STAGE/Applications"
+rm -f "$DMG"; hdiutil create -quiet -volname Mike -srcfolder "$STAGE" -format UDZO "$DMG"; rm -rf "$STAGE"
+if [ -n "${NOTARY_PROFILE:-}" ]; then
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$DMG"
+fi
+echo "built $APP ($VERSION, build $BUILD, signed: $IDENTITY), $ZIP and $DMG"
