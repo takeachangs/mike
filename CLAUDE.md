@@ -78,7 +78,7 @@ Changing any of these means changing every side in the same commit.
 
 # Known gaps
 
-- No echo cancellation in either call path: on laptop speakers the voice can hear itself and the cue sounds. Headphones avoid it.
+- No echo cancellation in bridge.py calls: on laptop speakers the voice can hear itself and the cue sounds. The app's call uses voice processing (one AVAudioEngine for mic and speaker) so the voice is cancelled; its cue sounds (afplay) still leak. Headphones avoid both.
 - Audio already queued keeps playing after the user interrupts the voice.
 - A recording and a call both own `state.json`; run one at a time (the app enforces this for its own sessions).
 - Recording minute stamps count audio samples: a gap (an input device switch, the Mac sleeping) shifts later stamps earlier by its length.
