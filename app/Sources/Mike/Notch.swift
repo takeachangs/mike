@@ -15,6 +15,7 @@ import SwiftUI
     var recorder: Recorder?, call: LiveCall?  // sessions running inside this app
     var launching = false, cancelled = false, stopping = false  // their lifecycle, see Launch.swift
     var width = Spring(0, response: 0.3), morph = Spring(0, response: 0.3)  // morph: the dots, 0 = at rest as the M, 1 = on their cycle
+    var dock = Spring(1, response: 0.3)  // 0 = the tab alone, centred (no cutout, idle), 1 = the tab beside the notch
     var depth = Spring(cardHeight, response: 0.3)  // the card's height: short for the idle actions, full for a session or a notice
     var round = Spring(0, response: 0.3)  // the resting dots: 0 = the M, 1 = the circle, which they become while the card is open
     var reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -29,11 +30,15 @@ import SwiftUI
 
     init(resident: Bool, envPID: pid_t?, recorderMode: Bool) {
         self.resident = resident; self.envPID = envPID; self.recorderMode = recorderMode
+        dock = Spring(geo.hasCutout ? 1 : 0, response: 0.3)
     }
 
     /// What a click opens: the tab during a session; while resident and idle, the notch itself.
     /// What a click opens: the tab during a session; while resident and idle, the tab or the notch.
-    func clickable(_ pt: CGPoint) -> Bool { state == "off" ? resident && geo.tabRect.union(geo.notchRect).contains(pt) : geo.tabRect.contains(pt) }
+    func clickable(_ pt: CGPoint) -> Bool {
+        if state == "off" && resident && dock.value < 0.5 { return geo.loneRect.contains(pt) }  // no cutout, idle: only the centred tab
+        return state == "off" ? resident && geo.tabRect.union(geo.notchRect).contains(pt) : geo.tabRect.contains(pt)
+    }
 
     /// A short message in the card (an error, "Saved"), opening the card when idle so it is seen.
     func say(_ text: String, for seconds: TimeInterval = 6) {
@@ -65,11 +70,17 @@ import SwiftUI
     /// The card at this frame, in panel coordinates: a `hang` whose edges, depth and corners interpolate from the
     /// closed shape to the card. Top corners stay square, meeting the bezel as the notch does. Also the content's clip.
     func cardShape() -> Path {
-        let h = geo.height, notchX = margin + tabWidth
+        let h = geo.height
         let x = reduce ? 1 : min(max(cx.value, 0), 1), y = reduce ? 1 : min(max(cy.value, 0), 1)
-        let l0 = notchX - max(width.value, 0), r0 = notchX + geo.notchWidth, b0 = h  // closed: the tab plus the notch
+        let (l0, r0) = closedEdges(), b0 = h  // closed: the tab plus the notch
         let l = l0 + (margin - l0) * x, r = r0 + (geo.cardRight - r0) * x, b = b0 + (h + depth.value - b0) * y
         return hang(l, r, b, 12 + 8 * y)
+    }
+
+    /// The closed shape's left and right edges: the tab plus the notch, sliding (dock) to the tab alone centred on the notch.
+    func closedEdges() -> (Double, Double) {
+        let notchX = margin + tabWidth, w = max(width.value, 0), c = notchX + geo.notchWidth / 2, u = 1 - dock.value
+        return (notchX - w + (c - w / 2 - notchX + w) * u, notchX + geo.notchWidth + (c + w / 2 - notchX - geo.notchWidth) * u)
     }
 
     /// Like boring.notch: once the pointer has been over the drawn shape or the card, leaving it for 100 ms closes the card.
@@ -114,7 +125,7 @@ import SwiftUI
         func still(_ s: Spring) -> Bool { abs(s.value - s.target) < 0.001 && abs(s.velocity) < 0.01 }
         retarget()  // before the stillness check, or a spring whose target just moved (pointer left) pauses the timeline a poll
         wake(state != "off" || open || pressed || overTab || starting != nil
-             || ![cx, cy, fade, width, orb, morph, depth, round].allSatisfy(still))
+             || ![cx, cy, fade, width, orb, morph, depth, round, dock].allSatisfy(still))
         if state != "off" || resident { offSince = nil; return }
         offSince = offSince ?? now
         if now.timeIntervalSince(offSince!) > 3 { NSApp.terminate(nil) }
@@ -142,6 +153,9 @@ import SwiftUI
         // session runs and, after a hang-up, until the card has landed on it.
         width.target = (resident && !quitting) || state != "off" || (width.value > 0.1 && cy.value >= 0.2) ? tabWidth : 0
         width.response = reduce ? 0.15 : state == "off" ? 0.24 : 0.3  // exits faster than it enters
+        // No cutout: the tab sits alone, centred, until a session or the card needs the notch; docks again only once the card is gone.
+        dock.target = geo.hasCutout || !resident || state != "off" || open || shown > 0.002 ? 1 : 0
+        dock.response = reduce ? 0.15 : 0.3
         morph.target = (thinking || state == "speaking") && !muted && !reduce ? 1 : 0  // the dots cycle while waiting or speaking
         depth.target = cardDepth
         round.target = (open || (state == "listening" && !muted && !recorderMode)) && !reduce ? 1 : 0  // the circle: card open, or a call listening
@@ -154,7 +168,7 @@ import SwiftUI
         let dt = min(0.05, last.map { now.timeIntervalSince($0) } ?? 0)
         last = now; t += dt
         retarget()
-        width.step(dt); morph.step(dt); depth.step(dt); round.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt)
+        width.step(dt); morph.step(dt); depth.step(dt); round.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); dock.step(dt)
         let goal = state == "thinking" || state == "off" ? 0 : target
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }
@@ -165,7 +179,7 @@ import SwiftUI
         // the full card cross-fades. Closing, the tail of the springs settles inside the hardware cutout, out of sight.
         if shown > 0.002 { ctx.fill(cardShape(), with: .color(.black.opacity(reduce ? fade.value : 1))) }
         var tab = Path()
-        if w > 0.1 {
+        if w > 0.1 && geo.hasCutout {
             let left = notchX - w, r = min(12, w, h / 2)
             tab.move(to: CGPoint(x: left, y: 0))
             tab.addLine(to: CGPoint(x: left, y: h - r))
@@ -178,10 +192,14 @@ import SwiftUI
             var shape = tab
             shape.addPath(hang(notchX, notchX + geo.notchWidth, h * min(w / tabWidth, 1), 12))
             ctx.fill(shape, with: .color(.black))
+        } else if w > 0.1 {  // no cutout: one pill, the tab alone while idle, widening into the tab plus the notch
+            let (l, r) = closedEdges()
+            tab = hang(l, r, h, 12)
+            ctx.fill(tab, with: .color(.black))
         }
         guard w > 0.1 else { return }
 
-        // The indicator: seven white dots in a 24-pt box 8 pt before the notch, vertically centred, fading in as the tab
+        // The indicator: seven white dots in a 24-pt box 8 pt before the notch (centred on the lone tab), vertically centred, fading in as the tab
         // uncovers it. At rest they are the m (two arches on flat feet), opening into the circle while the card is open
         // or a call is listening. Waiting, they run the morph cycle: the M
         // expands into a circle, which unfolds by quarter turns, then gathers back into the M (4.8 s, 5 % holds, 20 %
@@ -191,7 +209,7 @@ import SwiftUI
         var dots = ctx
         dots.clip(to: tab)
         dots.opacity = presence
-        dots.translateBy(x: notchX - 8 - 12, y: h / 2)
+        dots.translateBy(x: notchX - 8 - 12 + (geo.notchWidth / 2 + 8 + 12) * (1 - dock.value), y: h / 2)  // alone, centred on the tab
         let k = (0.9 + 0.1 * presence) * orb.value
         dots.scaleBy(x: k, y: k)
         let speaking = state == "speaking", m = min(max(morph.value, 0), 1), o = min(max(round.value, 0), 1)

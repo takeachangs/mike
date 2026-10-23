@@ -7,13 +7,15 @@ let cardHeight = 116.0, idleCardHeight = 80.0  // the session card; the idle one
 
 /// Where the notch is on the main screen, and the panel frames built around it. Panel coordinates have y down.
 struct NotchGeometry {
-    let notchLeft: Double, notchRight: Double, height: Double, screenTop: Double
+    let notchLeft: Double, notchRight: Double, height: Double, screenTop: Double, hasCutout: Bool
 
     init(screen: NSScreen) {
         if let l = screen.auxiliaryTopLeftArea, let r = screen.auxiliaryTopRightArea, screen.safeAreaInsets.top > 0 {
             (notchLeft, notchRight, height) = (l.maxX, r.minX, screen.safeAreaInsets.top)
+            hasCutout = true
         } else {
-            // No cutout: a centred 180-pt notch, as tall as the menu bar.
+            // No cutout: a centred 180-pt notch, as tall as the menu bar. Idle, only the tab shows, centred on it (Notch.dock).
+            hasCutout = false
             // ponytail: 24 pt is the menu bar since Big Sur (NSStatusBar.system.thickness still says 22); measure it if that changes.
             (notchLeft, notchRight, height) = (screen.frame.midX - 90, screen.frame.midX + 90, 24)
         }
@@ -23,6 +25,7 @@ struct NotchGeometry {
     var notchWidth: Double { notchRight - notchLeft }
     var cardRight: Double { margin + 2 * tabWidth + notchWidth }  // the card: tab's left edge to a tab past the notch
     var tabRect: CGRect { CGRect(x: 0, y: 0, width: margin + tabWidth, height: height) }
+    var loneRect: CGRect { CGRect(x: margin + tabWidth + notchWidth / 2 - tabWidth / 2, y: 0, width: tabWidth, height: height) }  // the tab alone, centred on the notch
     var notchRect: CGRect { CGRect(x: margin + tabWidth, y: 0, width: notchWidth, height: height) }
     var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - margin, y: screenTop - height, width: 2 * margin + tabWidth + notchWidth, height: height) }
     var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight, width: cardRight + margin, height: height + cardHeight) }
