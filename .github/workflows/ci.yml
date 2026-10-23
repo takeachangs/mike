@@ -79,6 +79,7 @@ jobs:
         run: |
           prev=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
           { echo "## Changes"; git log --no-merges --format='- %s' ${prev:+$prev..}HEAD; } > notes.md
+          cp app/dist/Mike-*.dmg app/dist/Mike.dmg  # a stable name for the README button: releases/latest/download/Mike.dmg
           gh release create "$GITHUB_REF_NAME" app/dist/*.zip app/dist/*.dmg --title "Mike $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
 
 permissions:
