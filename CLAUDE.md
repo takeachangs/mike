@@ -47,7 +47,7 @@ uv run bridge.py say  ID "text" / note ID "text"    # spoken result / quiet prog
 
 - **App, solo call**: Settings' key (or `OPENAI_API_KEY`) -> `LiveCall` in the app process. Hang-up is the card's button, the voice saying the sign-off, or silence (Settings: Never / 15-90 s, default 30): silence means no transcribed user words and no voice audio, never mic loudness, with the `wait` cue 10 s before, and a muted call never times out. The transcript is saved like bridge.py's.
 - **App, recording**: `Recorder` in the app process, into `~/.mike/listen-<stamp>.txt`. The model downloads on first use with progress in the card (or ahead of time from Settings).
-- **Agent-mode call**: `bridge.py` opens the Live session (seeding `context.txt`, capped at 4000 characters), writes delegations `{"id", "offset_ms", "transcript"}` to the inbox, forwards the agent's `say` / `note` from the outbox, and on hang-up (Ctrl-C, the notch's button, the sign-off, 90 s idle) writes `{"event": "closed", "seconds", "transcript"}` to the inbox and saves the transcript file.
+- **Agent-mode call**: `bridge.py` opens the Live session (seeding `context.txt`, capped at 4000 characters), writes delegations `{"id", "offset_ms", "transcript"}` to the inbox, forwards the agent's `say` / `note` from the outbox, and on hang-up (Ctrl-C, the notch's button, the sign-off, 60 s idle after a nudge at 30 s) writes `{"event": "closed", "seconds", "transcript"}` to the inbox and saves the transcript file.
 - **Skill recording**: `Listen <path>` (the binary inside Mike.app, or `app/.build/release/Listen`), stopped by Ctrl-C or the notch's stop button.
 
 # Contracts that must not drift
@@ -78,7 +78,6 @@ Changing any of these means changing every side in the same commit.
 
 # Known gaps
 
-- bridge.py's idle guard still uses a mic loudness threshold (`SPEECH_LEVEL`, 90 s), which noise can hold open; the app's call uses transcribed speech instead.
 - No echo cancellation in either call path: on laptop speakers the voice can hear itself and the cue sounds. Headphones avoid it.
 - Audio already queued keeps playing after the user interrupts the voice.
 - A recording and a call both own `state.json`; run one at a time (the app enforces this for its own sessions).

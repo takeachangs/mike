@@ -45,7 +45,7 @@ The tool lives in `~/projects/mike`: `bridge.py` runs the OpenAI Live session on
    - Follow-ups about a step come back as new delegations. Edit the same page (add a `class="now"` highlight on that section, append the explanation under it), re-open it, and `say` the explanation in plain words. Never send the page content to the voice; it only gets the outline.
    - If the delegation says the board is not showing, run `open` again and `say` "Board open:" again.
 
-6. Hanging up: when the person says they are done, the voice says goodbye ending in "Hanging up now." and the bridge closes the session on its own. The bridge also hangs up by itself after about 90 seconds with no speech and nothing pending. The line `{"event": "closed", "seconds": ..., ...}` then ends the call: stop the watcher and write a short log entry wherever the notes folder keeps session logs: call length (`seconds`, the billed duration), what was asked, any boards, anything written.
+6. Hanging up: when the person says they are done, the voice says goodbye ending in "Hanging up now." and the bridge closes the session on its own. The bridge also hangs up by itself after about 60 seconds with no speech and nothing pending. The line `{"event": "closed", "seconds": ..., ...}` then ends the call: stop the watcher and write a short log entry wherever the notes folder keeps session logs: call length (`seconds`, the billed duration), what was asked, any boards, anything written.
 
 ## Without a watcher
 
