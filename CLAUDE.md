@@ -16,7 +16,7 @@ app/Sources/MikeKit/            the library everything else is built on
   StateFile.swift, Paths.swift         ~/.mike paths, the state file and its 20 Hz ticker, os.Logger categories
   Sessions.swift, Transcript.swift     Library parsing of saved sessions; the per-minute transcript builder
   Cues.swift, Keychain.swift           cue sounds (Resources/sounds, played with afplay); the OpenAI key in the Keychain
-app/Sources/Mike/               the app: notch panel and drawing, in-app sessions (Launch.swift), Library and Settings windows
+app/Sources/Mike/               the app: notch panel and drawing, in-app sessions (Launch.swift), hold-right-⌘ dictation (Dictation.swift), Library and Settings windows
 app/Sources/Listen/main.swift        the recorder as a command for the /listen skill; launches the notch if no resident app is up
 app/Tests/MikeKitTests/         swift-testing unit tests for the library
 app/Resources/                       Info.plist template, entitlements, AppIcon.icns

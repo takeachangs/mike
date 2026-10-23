@@ -8,6 +8,9 @@ A Mac app that lives in your MacBook's notch. Click the notch to:
   or uploaded. The transcript has one paragraph per clock minute.
 - **Library**: every past call and recording as a card. Search, read,
   copy, export, or move to the Trash.
+- **Dictation** (turn on in Settings): hold the right ⌘ key, speak, let
+  go, and the words are typed where your cursor is, in any app. Same
+  on-device model; nothing is saved. Needs Accessibility access.
 
 While a session runs, an amber orb grows out of the notch; click it for the
 timer and the pause/mute and stop/hang-up buttons. Short, quiet cue sounds

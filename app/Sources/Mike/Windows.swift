@@ -164,6 +164,8 @@ struct SettingsView: View {
     @State private var loginItem = SMAppService.mainApp.status == .enabled
     @State private var mic = AVCaptureDevice.authorizationStatus(for: .audio)
     @State private var model: String? = Recorder.modelsOnDisk ? "Downloaded" : nil
+    @AppStorage("dictation") private var dictation = false
+    @State private var trusted = Dictation.trusted
 
     var body: some View {
         Form {
@@ -188,6 +190,16 @@ struct SettingsView: View {
                 }
             } header: { Text("Recording") } footer: {
                 Text("Recordings are transcribed on this Mac with Parakeet Ultra (about 600 MB, downloaded once). Audio is never saved or uploaded.")
+            }
+            Section {
+                Toggle("Hold right ⌘ to dictate", isOn: $dictation)
+                    .onChange(of: dictation) { if dictation { Dictation.warm(); if !trusted { Dictation.askTrust() } } }
+                LabeledContent("Accessibility") {
+                    if trusted { Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+                    else { Button("Allow") { Dictation.askTrust() } }
+                }
+            } header: { Text("Dictation") } footer: {
+                Text("Hold the right Command key, speak, let go: the words are typed where the cursor is. Transcribed on this Mac with the speech model; nothing is saved. Seeing the key and typing into other apps needs Accessibility access.")
             }
             Section {
                 SecureField("OpenAI API key", text: $key, prompt: Text("sk-…"))
@@ -229,6 +241,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .onAppear { mic = AVCaptureDevice.authorizationStatus(for: .audio) }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in trusted = Dictation.trusted }  // granted in System Settings meanwhile
     }
 
     func download() {

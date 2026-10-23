@@ -60,6 +60,7 @@ public final class Recorder: @unchecked Sendable {
 
     public let output: URL
     public private(set) var paused = false
+    public private(set) var transcript = ""  // the plain text, once stopped
     /// Each decoded window's text, and the minute label when it opens a new paragraph. Called off the main thread.
     public var onText: ((_ text: String, _ newMinute: String?) -> Void)?
     /// Problems after start (a device switch the engine could not follow). Called off the main thread.
@@ -143,6 +144,7 @@ public final class Recorder: @unchecked Sendable {
         await live.cancel()  // ends transcriptionUpdates so the display task drains the last window and exits
         await display?.value
         let full = await live.fullText
+        transcript = full
         try builder.render(full).write(to: output, atomically: true, encoding: .utf8)
         Log.recorder.info("saved \(self.output.path, privacy: .public)")
         return full.split(separator: " ").count
