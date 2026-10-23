@@ -16,6 +16,7 @@ import SwiftUI
     var launching = false, cancelled = false, stopping = false  // their lifecycle, see Launch.swift
     var peek = Spring(0, response: 0.2)  // resident and idle: the notch swells a little under the pointer
     var width = Spring(0, response: 0.3), morph = Spring(0, response: 0.3)  // morph: the dots, 0 = at rest as the M, 1 = on their cycle
+    var depth = Spring(cardHeight, response: 0.3)  // the card's height: short for the idle actions, full for a session or a notice
     var reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     var open = false, hovered = false, overTab = false, pressed = false, outSince: Date?
     // The card morphs out of the notch on two springs, width (cx) and height (cy), 0 = the closed shape, 1 = the card:
@@ -49,6 +50,9 @@ import SwiftUI
         if o { panel?.setFrame(geo.expanded, display: true); wake(true) }
     }
 
+    /// The idle card is just the row of actions; a session, or a notice, needs the full height.
+    var cardDepth: Double { state == "off" && resident && notice == nil ? idleCardHeight : cardHeight }
+
     /// How much of the card is showing: the morph, or the Reduce Motion fade.
     var shown: Double { reduce ? fade.value : max(cx.value, cy.value) }
 
@@ -65,7 +69,7 @@ import SwiftUI
         let x = reduce ? 1 : min(max(cx.value, 0), 1), y = reduce ? 1 : min(max(cy.value, 0), 1)
         // Closed: the hover swell over the notch when idle, the tab plus the notch during a session.
         let l0 = notchX - max(max(width.value, 0), 2 * pk), r0 = notchX + geo.notchWidth + 2 * pk, b0 = h + 4 * pk
-        let l = l0 + (margin - l0) * x, r = r0 + (geo.cardRight - r0) * x, b = b0 + (h + cardHeight - b0) * y
+        let l = l0 + (margin - l0) * x, r = r0 + (geo.cardRight - r0) * x, b = b0 + (h + depth.value - b0) * y
         return hang(l, r, b, 12 + 8 * y)
     }
 
@@ -82,7 +86,7 @@ import SwiftUI
             return
         }
         if CGRect(x: 0, y: 0, width: geo.collapsed.width, height: geo.height).contains(pt)
-            || hang(margin, geo.cardRight, geo.height + cardHeight, 20).contains(pt) { hovered = true; outSince = nil; return }
+            || hang(margin, geo.cardRight, geo.height + depth.value, 20).contains(pt) { hovered = true; outSince = nil; return }
         guard hovered else { return }
         outSince = outSince ?? now
         if now.timeIntervalSince(outSince!) >= 0.1 { setOpen(false) }
@@ -111,7 +115,7 @@ import SwiftUI
         func still(_ s: Spring) -> Bool { abs(s.value - s.target) < 0.001 && abs(s.velocity) < 0.01 }
         retarget()  // before the stillness check, or a spring whose target just moved (pointer left) pauses the timeline a poll
         wake(state != "off" || open || pressed || overTab || starting != nil
-             || ![cx, cy, fade, peek, width, press, orb, morph].allSatisfy(still))
+             || ![cx, cy, fade, peek, width, press, orb, morph, depth].allSatisfy(still))
         if state != "off" || resident { offSince = nil; return }
         offSince = offSince ?? now
         if now.timeIntervalSince(offSince!) > 3 { NSApp.terminate(nil) }
@@ -139,6 +143,7 @@ import SwiftUI
         width.target = state != "off" || (width.value > 0.1 && cy.value >= 0.2) ? tabWidth : 0
         width.response = reduce ? 0.15 : state == "off" ? 0.24 : 0.3  // exits faster than it enters
         morph.target = (thinking || state == "speaking") && !muted && !reduce ? 1 : 0  // the dots cycle while waiting or speaking
+        depth.target = cardDepth
         cx.target = open ? 1 : 0; cy.target = cx.target; fade.target = cx.target
         cx.response = open ? 0.26 : 0.34; cy.response = open ? 0.30 : 0.26  // see cx/cy; retargeting keeps velocity
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
@@ -150,7 +155,7 @@ import SwiftUI
         let dt = min(0.05, last.map { now.timeIntervalSince($0) } ?? 0)
         last = now; t += dt
         retarget()
-        width.step(dt); morph.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); peek.step(dt); press.step(dt)
+        width.step(dt); morph.step(dt); depth.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); peek.step(dt); press.step(dt)
         let goal = state == "thinking" || state == "off" ? 0 : target
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }

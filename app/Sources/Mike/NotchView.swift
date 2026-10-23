@@ -25,10 +25,10 @@ struct NotchView: View {
         if m.state == "off" && m.resident { actions() } else { session(now) }
     }
 
-    /// Resident and idle: what the app can start.
+    /// Resident and idle: the row of actions, with a notice above it only when there is one.
     func actions() -> some View {
         VStack(spacing: 10) {
-            reveal(label(m.notice ?? "Mike", alert: m.notice != nil), after: 0.08)
+            if let notice = m.notice { reveal(label(notice, alert: true), after: 0.08) }
             reveal(HStack(spacing: 14) {
                 action("phone.fill", "Call", fill: Color(red: 0.19, green: 0.78, blue: 0.35), lit: Color(red: 0.3, green: 0.85, blue: 0.45)) { m.launch(listen: false) }
                 action("waveform", "Listen") { m.launch(listen: true) }
@@ -38,7 +38,7 @@ struct NotchView: View {
             }, after: 0.12)
         }
         .foregroundStyle(.white)
-        .frame(width: geo.cardRight - margin, height: cardHeight)
+        .frame(width: geo.cardRight - margin, height: m.cardDepth)
         .allowsHitTesting(m.open && (m.reduce || m.cy.value > 0.8))  // not before it can be seen
         .offset(x: margin, y: geo.height)
     }
