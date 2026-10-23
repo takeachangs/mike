@@ -11,8 +11,8 @@ import UniformTypeIdentifiers
 
     static func library() { show("library", "Library", CGSize(width: 900, height: 600), Library()) }
     static func settings(welcome: Bool = false) {
-        if welcome { show("welcome", "Welcome to Mike", CGSize(width: 520, height: 600), SettingsView(welcome: true)) }
-        else { show("settings", "Settings", CGSize(width: 520, height: 560), SettingsView(welcome: false)) }
+        if welcome { show("welcome", "Welcome to Mike", CGSize(width: 520, height: 500), SettingsView(welcome: true)) }
+        else { show("settings", "Settings", CGSize(width: 520, height: 440), SettingsView(welcome: false)) }
     }
 
     private static func show(_ id: String, _ title: String, _ size: CGSize, _ view: some View) {
@@ -166,58 +166,74 @@ struct SettingsView: View {
     @State private var model: String? = Recorder.modelsOnDisk ? "Downloaded" : nil
 
     var body: some View {
-        Form {
+        VStack(spacing: 0) {
             if welcome {
-                Section {
-                    Text("Mike lives in your MacBook's notch. Click the notch to start a voice call or record a lecture; past sessions are in the Library.")
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text("Mike lives in your MacBook's notch. Click the notch to start a voice call or record a lecture; past sessions are in the Library.")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding([.horizontal, .top], 20)
             }
-            Section("Microphone") {
-                LabeledContent("Access") {
-                    switch mic {
-                    case .authorized: Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    case .notDetermined: Button("Allow microphone") { Task { _ = await Notch.microphoneAllowed(); mic = AVCaptureDevice.authorizationStatus(for: .audio) } }
-                    default: Button("Open Privacy Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }
+            TabView {
+                Form {
+                    Section("Microphone") {
+                        LabeledContent("Access") {
+                            switch mic {
+                            case .authorized: Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                            case .notDetermined: Button("Allow microphone") { Task { _ = await Notch.microphoneAllowed(); mic = AVCaptureDevice.authorizationStatus(for: .audio) } }
+                            default: Button("Open Privacy Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }
+                            }
+                        }
+                    }
+                    Section("General") {
+                        LabeledContent("Sound volume") {
+                            HStack {
+                                Slider(value: $volume, in: 0...1).frame(width: 160)
+                                    .onChange(of: volume) { Cue.level = volume }
+                                Button { Cue.ready.play() } label: { Image(systemName: "speaker.wave.2") }.buttonStyle(.borderless).help("Play a cue")
+                            }
+                        }
+                        Toggle("Open at login", isOn: $loginItem)
+                            .onChange(of: loginItem) { setLoginItem(loginItem) }
+                            .disabled(Bundle.main.bundleIdentifier == nil)
+                        LabeledContent("Data folder") { Button("Show in Finder") { NSWorkspace.shared.open(Paths.stateDir) } }
+                        LabeledContent("Version") { Text(appVersion).foregroundStyle(.secondary) }
                     }
                 }
-            }
-            Section {
-                LabeledContent("Speech model") {
-                    if let model { Text(model).foregroundStyle(.secondary) } else { Button("Download now") { download() } }
-                }
-            } header: { Text("Recording") } footer: {
-                Text("Recordings are transcribed on this Mac with Parakeet Ultra (about 600 MB, downloaded once). Audio is never saved or uploaded.")
-            }
-            Section {
-                SecureField("OpenAI API key", text: $key, prompt: Text("sk-…"))
-                    .onChange(of: key) { keySaved = false }
-                HStack {
-                    Button(keySaved ? "Saved" : "Save key") { keySaved = Keychain.setOpenAIKey(key) }.disabled(keySaved)
-                    if ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?.isEmpty == false {
-                        Text("OPENAI_API_KEY from the environment is used first.").font(.caption).foregroundStyle(.secondary)
+                .formStyle(.grouped)
+                .tabItem { Label("General", systemImage: "gearshape") }
+
+                Form {
+                    Section {
+                        LabeledContent("Speech model") {
+                            if let model { Text(model).foregroundStyle(.secondary) } else { Button("Download now") { download() } }
+                        }
+                    } header: { Text("Recording") } footer: {
+                        Text("Recordings are transcribed on this Mac with Parakeet Ultra (about 600 MB, downloaded once). Audio is never saved or uploaded.")
                     }
                 }
-                Picker("Hang up after silence", selection: $silence) {
-                    Text("Never").tag(0.0); Text("15 seconds").tag(15.0); Text("30 seconds").tag(30.0)
-                    Text("1 minute").tag(60.0); Text("90 seconds").tag(90.0)
-                }
-            } header: { Text("Calls") } footer: {
-                Text("Calls use OpenAI's GPT-Live and are billed to this key per second, silence included. The key is kept in your Keychain. Saying goodbye also hangs up; a soft cue plays 10 seconds before a silent call ends.")
-            }
-            Section("General") {
-                LabeledContent("Sound volume") {
-                    HStack {
-                        Slider(value: $volume, in: 0...1).frame(width: 160)
-                            .onChange(of: volume) { Cue.level = volume }
-                        Button { Cue.ready.play() } label: { Image(systemName: "speaker.wave.2") }.buttonStyle(.borderless).help("Play a cue")
+                .formStyle(.grouped)
+                .tabItem { Label("Listen", systemImage: "waveform") }
+
+                // Everything a future paywall gates lives in this tab (see the paywall issue), so gating it is a single `if`.
+                Form {
+                    Section {
+                        SecureField("OpenAI API key", text: $key, prompt: Text("sk-…"))
+                            .onChange(of: key) { keySaved = false }
+                        HStack {
+                            Button(keySaved ? "Saved" : "Save key") { keySaved = Keychain.setOpenAIKey(key) }.disabled(keySaved)
+                            if ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?.isEmpty == false {
+                                Text("OPENAI_API_KEY from the environment is used first.").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Picker("Hang up after silence", selection: $silence) {
+                            Text("Never").tag(0.0); Text("15 seconds").tag(15.0); Text("30 seconds").tag(30.0)
+                            Text("1 minute").tag(60.0); Text("90 seconds").tag(90.0)
+                        }
+                    } header: { Text("Calls") } footer: {
+                        Text("Calls use OpenAI's GPT-Live and are billed to this key per second, silence included. The key is kept in your Keychain. Saying goodbye also hangs up; a soft cue plays 10 seconds before a silent call ends.")
                     }
                 }
-                Toggle("Open at login", isOn: $loginItem)
-                    .onChange(of: loginItem) { setLoginItem(loginItem) }
-                    .disabled(Bundle.main.bundleIdentifier == nil)
-                LabeledContent("Data folder") { Button("Show in Finder") { NSWorkspace.shared.open(Paths.stateDir) } }
-                LabeledContent("Version") { Text(appVersion).foregroundStyle(.secondary) }
+                .formStyle(.grouped)
+                .tabItem { Label("Call", systemImage: "phone") }
             }
             if welcome {
                 Button("Done") {
@@ -225,9 +241,9 @@ struct SettingsView: View {
                     NSApp.keyWindow?.close()
                 }
                 .keyboardShortcut(.defaultAction)
+                .padding(.bottom, 16)
             }
         }
-        .formStyle(.grouped)
         .onAppear { mic = AVCaptureDevice.authorizationStatus(for: .audio) }
     }
 
