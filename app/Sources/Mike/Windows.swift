@@ -9,7 +9,11 @@ import UniformTypeIdentifiers
 @MainActor enum Windows {
     private static var open: [String: NSWindow] = [:]
 
-    static func library() { show("library", "Library", CGSize(width: 900, height: 600), Library()) }
+    static let select = Notification.Name("mikeLibrarySelect")
+    static func library(select url: URL? = nil) {
+        show("library", "Library", CGSize(width: 900, height: 600), Library(select: url))
+        if let url { NotificationCenter.default.post(name: select, object: url) }  // an already-open window keeps its view
+    }
     static func settings(welcome: Bool = false) {
         if welcome { show("welcome", "Welcome to Mike", CGSize(width: 520, height: 500), SettingsView(welcome: true)) }
         else { show("settings", "Settings", CGSize(width: 520, height: 440), SettingsView(welcome: false)) }
@@ -38,6 +42,8 @@ struct Library: View {
     @State private var sessions = Session.load()
     @State private var selection: URL?
     @State private var query = ""
+    @State private var stamp: Date?
+    init(select: URL? = nil) { _selection = State(initialValue: select) }
 
     var shown: [Session] {
         query.isEmpty ? sessions : sessions.filter {
@@ -74,6 +80,14 @@ struct Library: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in sessions = Session.load() }
+        .onReceive(NotificationCenter.default.publisher(for: Windows.select)) { n in
+            sessions = Session.load(); selection = n.object as? URL
+        }
+        // ponytail: polls every 2 s and re-parses all sessions when the selected file changed; a file watcher if the library gets large
+        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+            let d = selection.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date }
+            if d != stamp { stamp = d; sessions = Session.load() }
+        }
     }
 }
 

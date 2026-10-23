@@ -15,9 +15,12 @@ struct NotchView: View {
                 .onChanged { g in m.pressed = m.clickable(g.startLocation) }
                 .onEnded { g in if m.pressed && m.clickable(g.location) { m.setOpen(!m.open) }; m.pressed = false })
             .overlay(alignment: .topLeading) {  // overlay: never resizes the root
-                card(tl.date)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .clipShape(m.cardShape())  // content never shows outside the black, mid-morph included
+                ZStack(alignment: .topLeading) {
+                    card(tl.date)
+                    if m.recorderMode && m.state != "off" { libraryButton() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipShape(m.cardShape())  // content never shows outside the black, mid-morph included
             }
         }
     }
@@ -42,6 +45,17 @@ struct NotchView: View {
         .frame(width: geo.cardRight - margin, height: m.cardDepth)
         .allowsHitTesting(m.open && (m.reduce || m.cy.value > 0.8))  // not before it can be seen
         .offset(x: margin, y: geo.height)
+    }
+
+    /// Recording only: the empty slot right of the camera notch opens the Library on this recording, which keeps updating.
+    func libraryButton() -> some View {
+        reveal(LibraryButton {
+            m.setOpen(false)
+            Windows.library(select: m.recorder?.output ?? Session.load().first { $0.kind == .recording }?.id)
+        }, after: 0.08)
+        .frame(width: tabWidth, height: geo.height)
+        .allowsHitTesting(m.open && (m.reduce || m.cy.value > 0.8))
+        .offset(x: margin + tabWidth + geo.notchWidth)
     }
 
     func label(_ text: String, alert: Bool = false) -> some View {
@@ -123,4 +137,13 @@ struct Round: ButtonStyle {
 /// First click on a button acts even though the panel is never key and the app never activates.
 final class Host: NSHostingView<NotchView> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+private struct LibraryButton: View {
+    let run: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: run) { Image(systemName: "rectangle.stack").font(.system(size: 13)).foregroundStyle(.white).opacity(hover ? 1 : 0.6) }
+            .buttonStyle(.plain).onHover { hover = $0 }.accessibilityLabel("Library")
+    }
 }
