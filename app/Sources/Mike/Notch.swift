@@ -206,8 +206,9 @@ import SwiftUI
         }
     }
 
-    /// The M: left column top to bottom, the centre, right column top to bottom (y down).
-    static let mShape: [(Double, Double)] = [(-7, -7), (-7, 0), (-7, 7), (0, 0), (7, -7), (7, 0), (7, 7)]
+    /// The M: left column top to bottom, the centre, right column top to bottom (y down). The top row sits closer to the
+    /// middle one than the bottom does, so it reads as a letter rather than a grid.
+    static let mShape: [(Double, Double)] = [(-7, -4.5), (-7, 0), (-7, 7), (0, 0.5), (7, -4.5), (7, 0), (7, 7)]
     /// The circle of 7, turned by `turn`: each M dot takes the slot nearest its own angle (the centre takes the top),
     /// so the glide between them expands outward instead of crossing.
     static func circle(_ turn: Double) -> [(Double, Double)] {

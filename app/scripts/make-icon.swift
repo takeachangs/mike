@@ -14,10 +14,10 @@ func render(_ px: Int) -> Data {
         }
         body.close()
         NSGradient(starting: NSColor(white: 0.16, alpha: 1), ending: NSColor(white: 0.04, alpha: 1))!.draw(in: body, angle: -90)
-        // The M: 3-1-3 on a 3x3 grid, white, the same dots the notch shows.
-        let pitch = s * 0.21, d = s * 0.095
-        for (col, row) in [(-1, -1), (-1, 0), (-1, 1), (0, 0), (1, -1), (1, 0), (1, 1)] {
-            let c = CGPoint(x: s / 2 + CGFloat(col) * pitch, y: s / 2 + CGFloat(row) * pitch)
+        // The M: the same seven dots the notch shows (Notch.mShape, y down there), 7 units = 21 % of the icon.
+        let unit = s * 0.03, d = s * 0.095
+        for (x, y) in [(-7.0, -4.5), (-7.0, 0.0), (-7.0, 7.0), (0.0, 0.5), (7.0, -4.5), (7.0, 0.0), (7.0, 7.0)] {
+            let c = CGPoint(x: s / 2 + CGFloat(x) * unit, y: s / 2 - CGFloat(y) * unit)
             NSColor.white.setFill()
             NSBezierPath(ovalIn: NSRect(x: c.x - d / 2, y: c.y - d / 2, width: d, height: d)).fill()
         }
