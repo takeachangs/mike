@@ -52,9 +52,9 @@ Then prove the notch draws, without any API call:
 cd ~/projects/mike/app && swift build -c release && python3 scripts/drive.py
 ```
 
-For about eleven seconds a black tab grows to the left of the notch: a ring
-of white dots, then a rippling 3x3 lattice, then a comet running round the
-ring, then the tab collapses and the app quits. If the app does not appear, see
+For about eleven seconds a black tab grows to the left of the notch: seven
+white dots as an M, then the M morphing through a circle, then the circle
+turning, then the tab collapses and the app quits. If the app does not appear, see
 Troubleshooting.
 
 ## 3. Check the bridge can reach GPT-Live
@@ -151,7 +151,7 @@ call" (or `/call`). Check off:
 1. The terminal tab prints `call started`, and the notch tab appears.
 2. They say hello; the voice answers without delegating.
 3. They ask something about their notes. The voice says it will check, the
-   notch shows the rippling lattice, a line lands in
+   notch's dots start morphing, a line lands in
    `~/.mike/inbox.jsonl`, the agent answers with
    `uv run ~/projects/mike/bridge.py say <id> "…"`, and the voice
    speaks it.

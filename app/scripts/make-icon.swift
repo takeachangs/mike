@@ -1,5 +1,5 @@
-// Draws Resources/AppIcon.icns: the notch's indicator, a 3x3 lattice of white dots caught mid-ripple, on a dark
-// macOS squircle. Run from app/: swift scripts/make-icon.swift
+// Draws Resources/AppIcon.icns: the notch's seven dots at rest, the M, on a dark macOS squircle.
+// Run from app/: swift scripts/make-icon.swift
 import AppKit
 
 func render(_ px: Int) -> Data {
@@ -14,15 +14,12 @@ func render(_ px: Int) -> Data {
         }
         body.close()
         NSGradient(starting: NSColor(white: 0.16, alpha: 1), ending: NSColor(white: 0.04, alpha: 1))!.draw(in: body, angle: -90)
-        // The ripple one beat out from the centre: centre bright, edges half, corners at rest; lit dots a little larger.
-        let pitch = s * 0.21, d = s * 0.105
-        for row in -1...1 {
-            for col in -1...1 {
-                let lit: CGFloat = row == 0 && col == 0 ? 1 : abs(row) + abs(col) == 1 ? 0.55 : 0.2
-                let dd = d * (1 + 0.18 * lit), c = CGPoint(x: s / 2 + CGFloat(col) * pitch, y: s / 2 - CGFloat(row) * pitch)
-                NSColor(white: 1, alpha: lit).setFill()
-                NSBezierPath(ovalIn: NSRect(x: c.x - dd / 2, y: c.y - dd / 2, width: dd, height: dd)).fill()
-            }
+        // The M: 3-1-3 on a 3x3 grid, white, the same dots the notch shows.
+        let pitch = s * 0.21, d = s * 0.095
+        for (col, row) in [(-1, -1), (-1, 0), (-1, 1), (0, 0), (1, -1), (1, 0), (1, 1)] {
+            let c = CGPoint(x: s / 2 + CGFloat(col) * pitch, y: s / 2 + CGFloat(row) * pitch)
+            NSColor.white.setFill()
+            NSBezierPath(ovalIn: NSRect(x: c.x - d / 2, y: c.y - d / 2, width: d, height: d)).fill()
         }
         return true
     }

@@ -9,10 +9,11 @@ A Mac app that lives in your MacBook's notch. Click the notch to:
 - **Library**: every past call and recording as a card. Search, read,
   copy, export, or move to the Trash.
 
-While a session runs, a small tab of white dots grows out of the notch: a
-ripple while it loads, a ring that brightens with your voice, a comet while
-the voice replies. Click it for the timer and the pause/mute and
-stop/hang-up buttons. Short, quiet cue sounds
+While a session runs, a small tab grows out of the notch with seven white
+dots, the M from the icon: they morph through a circle while it loads or
+the voice thinks, keep turning while the voice replies, and brighten with
+your voice while it listens. Click the tab for the timer and the
+pause/mute and stop/hang-up buttons. Short, quiet cue sounds
 mark start, pause and stop.
 
 It also works as the voice and recording front end for a coding agent:

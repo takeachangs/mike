@@ -15,7 +15,7 @@ import SwiftUI
     var recorder: Recorder?, call: LiveCall?  // sessions running inside this app
     var launching = false, cancelled = false, stopping = false  // their lifecycle, see Launch.swift
     var peek = Spring(0, response: 0.2)  // resident and idle: the notch swells a little under the pointer
-    var width = Spring(0, response: 0.3), grid = Spring(0, response: 0.3)  // grid: the indicator, 1 = lattice, 0 = ring
+    var width = Spring(0, response: 0.3), morph = Spring(0, response: 0.3)  // morph: the dots, 0 = at rest as the M, 1 = on their cycle
     var reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     var open = false, hovered = false, overTab = false, pressed = false, outSince: Date?
     // The card morphs out of the notch on two springs, width (cx) and height (cy), 0 = the closed shape, 1 = the card:
@@ -111,7 +111,7 @@ import SwiftUI
         func still(_ s: Spring) -> Bool { abs(s.value - s.target) < 0.001 && abs(s.velocity) < 0.01 }
         retarget()  // before the stillness check, or a spring whose target just moved (pointer left) pauses the timeline a poll
         wake(state != "off" || open || pressed || overTab || starting != nil
-             || ![cx, cy, fade, peek, width, press, orb, grid].allSatisfy(still))
+             || ![cx, cy, fade, peek, width, press, orb, morph].allSatisfy(still))
         if state != "off" || resident { offSince = nil; return }
         offSince = offSince ?? now
         if now.timeIntervalSince(offSince!) > 3 { NSApp.terminate(nil) }
@@ -138,7 +138,7 @@ import SwiftUI
         // The tab belongs to a session; after a hang-up it stays until the card has landed on it. It never grows for the idle menu.
         width.target = state != "off" || (width.value > 0.1 && cy.value >= 0.2) ? tabWidth : 0
         width.response = reduce ? 0.15 : state == "off" ? 0.24 : 0.3  // exits faster than it enters
-        grid.target = thinking || (muted && state != "speaking") ? 1 : 0  // lattice while waiting or paused, else the ring
+        morph.target = (thinking || state == "speaking") && !muted && !reduce ? 1 : 0  // the dots cycle while waiting or speaking
         cx.target = open ? 1 : 0; cy.target = cx.target; fade.target = cx.target
         cx.response = open ? 0.26 : 0.34; cy.response = open ? 0.30 : 0.26  // see cx/cy; retargeting keeps velocity
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
@@ -150,7 +150,7 @@ import SwiftUI
         let dt = min(0.05, last.map { now.timeIntervalSince($0) } ?? 0)
         last = now; t += dt
         retarget()
-        width.step(dt); grid.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); peek.step(dt); press.step(dt)
+        width.step(dt); morph.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); peek.step(dt); press.step(dt)
         let goal = state == "thinking" || state == "off" ? 0 : target
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }
@@ -180,50 +180,43 @@ import SwiftUI
         }
         guard w > 0.1 else { return }
 
-        // The indicator: white dots in a 24-pt box 8 pt before the notch, vertically centred, fading in as the tab
-        // uncovers it. A 3x3 lattice while waiting (a ripple from the centre, 1.7 s) or paused (the centre dot steady);
-        // a ring of 8 while the mic is open (the dots brighten and swell with the level over a slow pulse) or the
-        // voice speaks (a comet runs round, 1.8 s). The two cross-fade on `grid`. Reduce Motion: nothing moves.
-        let presence = min(max((w - 12) / 30, 0), 1), rest = 0.2
+        // The indicator: seven white dots in a 24-pt box 8 pt before the notch, vertically centred, fading in as the tab
+        // uncovers it. At rest they are the M (3-1-3 on a 3x3 grid, pitch 7). Waiting, they run the morph cycle: the M
+        // expands into a circle, which unfolds by quarter turns, then gathers back into the M (4.8 s, 5 % holds, 20 %
+        // glides). Speaking, the circle keeps unfolding. Listening, the M brightens and swells with the level; paused
+        // or muted, it dims with the centre lit. `morph` glides between the resting M and the cycle on state changes.
+        let presence = min(max((w - 12) / 30, 0), 1)
         var dots = ctx
         dots.clip(to: tab)
         dots.opacity = presence
         dots.translateBy(x: notchX - 8 - 12, y: h / 2)
         let k = (0.9 + 0.1 * presence) * orb.value
         dots.scaleBy(x: k, y: k)
-        func dot(_ x: Double, _ y: Double, _ d: Double, _ a: Double) {
-            guard a > 0.001 else { return }
+        let speaking = state == "speaking", m = min(max(morph.value, 0), 1)
+        let cycle = Notch.pose(speaking ? Notch.unfolding : Notch.morphing, at: (t / 4.8).truncatingRemainder(dividingBy: 1))
+        for i in 0..<7 {
+            let r = Notch.mShape[i], c = cycle[i], x = r.0 + (c.0 - r.0) * m, y = r.1 + (c.1 - r.1) * m
+            let listening = state == "listening" && !muted
+            let a = muted ? (i == 3 ? 1 : 0.35) : listening ? 0.6 + 0.4 * level : 1
+            let d = 3 * (listening && !reduce ? 1 + 0.3 * level : 1)
             dots.fill(Path(ellipseIn: CGRect(x: x - d / 2, y: y - d / 2, width: d, height: d)), with: .color(.white.opacity(a)))
         }
-        func wrap(_ u: Double) -> Double { u - floor(u) }
-        let g = min(max(grid.value, 0), 1)
-        if g > 0.001 {  // lattice: pitch 7, dots 3.5
-            for row in -1...1 {
-                for col in -1...1 {
-                    var lit = row == 0 && col == 0 ? 1.0 : 0.0  // at rest, and under Reduce Motion: the centre
-                    if state == "thinking" && !reduce {
-                        let delay = hypot(Double(col), Double(row)) * 0.7 - (row == 0 && col == 0 ? 0.18 : 0)
-                        let u = wrap((t - delay) / 1.7)
-                        lit = u < 0.28 ? cssEase(u / 0.28, 0.66, 0, 0.34, 1) : u < 0.56 ? 1 - cssEase((u - 0.28) / 0.28, 0.66, 0, 0.34, 1) : 0
-                    }
-                    dot(Double(col) * 7, Double(row) * 7, 3.5 * (1 + 0.18 * lit), g * (rest + (1 - rest) * lit))
-                }
-            }
-        }
-        if g < 0.999 {  // ring: 8 dots on radius 8, dots 3
-            let speaking = state == "speaking"
-            for i in 0..<8 {
-                let a = Double(i) / 8 * 2 * .pi, lit: Double
-                if reduce {
-                    lit = 0.7
-                } else if speaking {
-                    let u = wrap(t / 1.8 - Double(i) / 8)
-                    lit = u < 0.12 ? 0.08 + 0.92 * u / 0.12 : u < 0.35 ? 1 - 0.5 * (u - 0.12) / 0.23 : u < 0.6 ? 0.5 - 0.38 * (u - 0.35) / 0.25 : 0.12 - 0.04 * (u - 0.6) / 0.4
-                } else {
-                    lit = max(0.35 * (1 - cos(2 * .pi * (t / 2 - Double(i) / 8))) / 2, level)
-                }
-                dot(8 * cos(a), 8 * sin(a), 3 * (speaking || reduce ? 1 : 0.9 + 0.25 * level), (1 - g) * (rest + (1 - rest) * lit))
-            }
-        }
+    }
+
+    /// The M: left column top to bottom, the centre, right column top to bottom (y down).
+    static let mShape: [(Double, Double)] = [(-7, -7), (-7, 0), (-7, 7), (0, 0), (7, -7), (7, 0), (7, 7)]
+    /// The circle of 7, turned by `turn`: each M dot takes the slot nearest its own angle (the centre takes the top),
+    /// so the glide between them expands outward instead of crossing.
+    static func circle(_ turn: Double) -> [(Double, Double)] {
+        [6, 5, 4, 0, 1, 2, 3].map { let a = Double($0) / 7 * 2 * .pi - .pi / 2 + turn; return (cos(a) * 7, sin(a) * 7) }
+    }
+    static let morphing = [mShape, circle(0), circle(.pi / 2), circle(.pi)]
+    static let unfolding = [circle(0), circle(.pi / 2), circle(.pi), circle(.pi * 1.5)]
+    /// Where the dots are at phase `u` of a four-pose cycle: each quarter holds its pose for a fifth, then glides to
+    /// the next on cubic-bezier(0.4, 0, 0.2, 1), the reference's morph timing.
+    static func pose(_ poses: [[(Double, Double)]], at u: Double) -> [(Double, Double)] {
+        let q = u * 4, slot = Int(q) % 4, f = q - floor(q), k = f < 0.2 ? 0 : cssEase((f - 0.2) / 0.8, 0.4, 0, 0.2, 1)
+        let a = poses[slot], b = poses[(slot + 1) % 4]
+        return (0..<7).map { (a[$0].0 + (b[$0].0 - a[$0].0) * k, a[$0].1 + (b[$0].1 - a[$0].1) * k) }
     }
 }
