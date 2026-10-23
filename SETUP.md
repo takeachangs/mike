@@ -90,7 +90,8 @@ error text.
 
 ## 4. Personalise the voice prompt
 
-Open `prompt.txt`. It is written for its original owner. Change, with the
+Copy `prompt.txt` to `~/.mike/prompt.txt` (the bridge prefers that file and
+the repo copy stays generic), then edit the copy. Change, with the
 person's answers:
 
 - **Role and Objective**: the person's name, and the name of the agent
@@ -180,7 +181,7 @@ one without being asked.
   seconds; the resident app (started on its own) stays by design and quits
   from its card. If something died hard, `pkill Mike`.
 - **The voice answers notes questions itself instead of delegating**: the
-  Delegation section in `prompt.txt` is the knob. Add the kind of question
+  Delegation section in `~/.mike/prompt.txt` is the knob. Add the kind of question
   it answered to the list.
 - **`-R x,y,w,h` to screencapture fails**: write it without the space,
   `-Rx,y,w,h`.

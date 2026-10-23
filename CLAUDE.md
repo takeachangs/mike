@@ -22,12 +22,12 @@ app/Tests/MikeKitTests/         swift-testing unit tests for the library
 app/Resources/                       Info.plist template, entitlements, AppIcon.icns
 app/scripts/                         build-app.sh (bundle, sign, notarize, zip), install.sh (safe replace in /Applications), make-icon.swift, make-sounds.py (needs earshot), drive.py
 bridge.py                            agent-mode call: Live session, audio, inbox/outbox, state file, notch launch (single file, uv inline deps)
-prompt.txt                           the agent-mode voice prompt, read once at bridge start; personalised for its owner
+prompt.txt                           the agent-mode voice prompt, generic, read once at bridge start; `~/.mike/prompt.txt` overrides it when present
 skill/SKILL.md, skill/listen/SKILL.md  generic copies of the agent-side /call and /listen procedures, installed into a notes folder
 .github/workflows/ci.yml             tests and an app build on pull requests and pushes to main; a v* tag (app/scripts/release.sh) publishes the zip and DMG as a release with commit-list notes
 ```
 
-Runtime state lives outside the repo in `~/.mike/`: `state.json`, `app.pid`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), `listen-<stamp>.txt` per recording (paragraphs starting `HH:MM `) with the agent's `listen-<stamp>.md` notes beside it, and for agent mode `context.txt`, `inbox.jsonl`, `outbox.jsonl` and `board/`. Settings (sound volume, onboarded) are in the app's UserDefaults; the OpenAI key is in the login Keychain (`com.takeachangs.mike`).
+Runtime state lives outside the repo in `~/.mike/`: `state.json`, `app.pid`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), `listen-<stamp>.txt` per recording (paragraphs starting `HH:MM `) with the agent's `listen-<stamp>.md` notes beside it, and for agent mode `prompt.txt` (personal voice prompt), `context.txt`, `inbox.jsonl`, `outbox.jsonl` and `board/`. Settings (sound volume, onboarded) are in the app's UserDefaults; the OpenAI key is in the login Keychain (`com.takeachangs.mike`).
 
 # Commands
 
@@ -72,6 +72,7 @@ Changing any of these means changing every side in the same commit.
 - **The key stays out of files.** It lives in the Keychain or the environment. Never write it into the repo or anywhere else.
 - **Keep the repo out of iCloud-synced folders** (`~/Documents`, `~/Desktop`): the Swift build directory churns.
 - **Keep it small.** One package, FluidAudio as the only Swift dependency, `bridge.py` one file with three. No abstractions with one user, no config files. A deliberate shortcut gets a `ponytail:` comment naming its ceiling.
+- **`prompt.txt` stays generic**, like `skill/`: personal details go in `~/.mike/prompt.txt`.
 - **`skill/` stays generic.** No names, courses, or paths from any one person's notes folder; the installed copy is where personal details go.
 - **Test what can be tested offline**: extend the Swift tests for library logic (parsing, transcript, protocol, state) and `selftest` for bridge logic.
 - **Bundle resources** are found through `Cue.resources` (Contents/Resources first), not `Bundle.module`, which only looks at the .app's top level, where code signing forbids files.

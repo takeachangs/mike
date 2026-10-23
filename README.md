@@ -62,7 +62,7 @@ app/                    the Swift package (see app/Package.swift)
   Resources/            Info.plist, entitlements, icon
   scripts/              build-app.sh, make-icon.swift, make-sounds.py, drive.py (fake session for the notch)
 bridge.py               the agent-mode call: GPT-Live with client delegation, answered by a coding agent
-prompt.txt              the voice prompt for agent-mode calls
+prompt.txt              the generic voice prompt for agent-mode calls (`~/.mike/prompt.txt` overrides it)
 skill/                  the agent-side /call and /listen procedures, installed into a notes folder
 ```
 
@@ -90,4 +90,8 @@ and DMG with notes listing every commit since the previous release.
 
 Point your coding agent at [SETUP.md](SETUP.md) and say "set this up". It
 checks the prerequisites, builds the app, tests the key, personalises
-`prompt.txt` and installs the skills into your notes folder.
+a copy of `prompt.txt` in `~/.mike` and installs the skills into your notes folder.
+
+## License
+
+GPL-3.0. See LICENSE.
