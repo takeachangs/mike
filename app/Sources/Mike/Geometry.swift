@@ -4,7 +4,6 @@ import SwiftUI
 let amber = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
 let tabWidth = 42.0, margin = 10.0, overlap = 12.0  // margin: panel room left of the tab; overlap: black under the notch so its corner fills in
 let cardHeight = 116.0, idleCardHeight = 80.0  // the session card; the idle one, just the row of actions
-let pad = 4.0  // room below and right of the notch for the hover swell, else the window clips it
 
 /// Where the notch is on the main screen, and the panel frames built around it. Panel coordinates have y down.
 struct NotchGeometry {
@@ -25,8 +24,8 @@ struct NotchGeometry {
     var cardRight: Double { margin + 2 * tabWidth + notchWidth }  // the card: tab's left edge to a tab past the notch
     var tabRect: CGRect { CGRect(x: 0, y: 0, width: margin + tabWidth, height: height) }
     var notchRect: CGRect { CGRect(x: margin + tabWidth, y: 0, width: notchWidth, height: height) }
-    var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - margin, y: screenTop - height - pad, width: 2 * margin + tabWidth + notchWidth + pad, height: height + pad) }
-    var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight - pad, width: cardRight + margin + pad, height: height + cardHeight + pad) }
+    var collapsed: NSRect { NSRect(x: notchLeft - tabWidth - margin, y: screenTop - height, width: 2 * margin + tabWidth + notchWidth, height: height) }
+    var expanded: NSRect { NSRect(x: collapsed.minX, y: collapsed.maxY - height - cardHeight, width: cardRight + margin, height: height + cardHeight) }
 }
 
 /// Recomputed when displays change (main.swift); read on the main thread only.

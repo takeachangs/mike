@@ -14,16 +14,15 @@ import SwiftUI
     var notice: String?, noticeUntil = Date.distantPast
     var recorder: Recorder?, call: LiveCall?  // sessions running inside this app
     var launching = false, cancelled = false, stopping = false  // their lifecycle, see Launch.swift
-    var peek = Spring(0, response: 0.2)  // resident and idle: the notch swells a little under the pointer
     var width = Spring(0, response: 0.3), morph = Spring(0, response: 0.3)  // morph: the dots, 0 = at rest as the M, 1 = on their cycle
     var depth = Spring(cardHeight, response: 0.3)  // the card's height: short for the idle actions, full for a session or a notice
     var reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    var open = false, hovered = false, overTab = false, pressed = false, outSince: Date?
+    var open = false, hovered = false, overTab = false, pressed = false, quitting = false, outSince: Date?
     // The card morphs out of the notch on two springs, width (cx) and height (cy), 0 = the closed shape, 1 = the card:
     // opening leads with width (the notch widens, then drops), closing leads with height (it ends as a notch-tall pill
     // narrowing into the cutout). Responses are set per direction in step(). Reduce Motion cross-fades instead (fade).
     var cx = Spring(0, response: 0.26), cy = Spring(0, response: 0.30), fade = Spring(0, response: 0.2)
-    var orb = Spring(1, response: 0.1), press = Spring(1, response: 0.1)  // indicator hover/press; the notch's press dip
+    var orb = Spring(1, response: 0.1)  // the dots' hover grow and press shrink
     /// False when nothing is drawn or moving: the view's timeline pauses, so an idle app costs no frames.
     @Published var awake = true
 
@@ -32,8 +31,8 @@ import SwiftUI
     }
 
     /// What a click opens: the tab during a session; while resident and idle, the notch itself.
-    // Idle: the swollen outline too (2 pt a side, 4 pt down), so the pointer on the swell does not flicker it off.
-    func clickable(_ pt: CGPoint) -> Bool { state == "off" ? resident && geo.notchRect.insetBy(dx: -2, dy: -4).contains(pt) : geo.tabRect.contains(pt) }
+    /// What a click opens: the tab during a session; while resident and idle, the tab or the notch.
+    func clickable(_ pt: CGPoint) -> Bool { state == "off" ? resident && geo.tabRect.union(geo.notchRect).contains(pt) : geo.tabRect.contains(pt) }
 
     /// A short message in the card (an error, "Saved"), opening the card when idle so it is seen.
     func say(_ text: String, for seconds: TimeInterval = 6) {
@@ -65,10 +64,9 @@ import SwiftUI
     /// The card at this frame, in panel coordinates: a `hang` whose edges, depth and corners interpolate from the
     /// closed shape to the card. Top corners stay square, meeting the bezel as the notch does. Also the content's clip.
     func cardShape() -> Path {
-        let h = geo.height, notchX = margin + tabWidth, pk = peek.value * press.value
+        let h = geo.height, notchX = margin + tabWidth
         let x = reduce ? 1 : min(max(cx.value, 0), 1), y = reduce ? 1 : min(max(cy.value, 0), 1)
-        // Closed: the hover swell over the notch when idle, the tab plus the notch during a session.
-        let l0 = notchX - max(max(width.value, 0), 2 * pk), r0 = notchX + geo.notchWidth + 2 * pk, b0 = h + 4 * pk
+        let l0 = notchX - max(width.value, 0), r0 = notchX + geo.notchWidth, b0 = h  // closed: the tab plus the notch
         let l = l0 + (margin - l0) * x, r = r0 + (geo.cardRight - r0) * x, b = b0 + (h + depth.value - b0) * y
         return hang(l, r, b, 12 + 8 * y)
     }
@@ -115,7 +113,7 @@ import SwiftUI
         func still(_ s: Spring) -> Bool { abs(s.value - s.target) < 0.001 && abs(s.velocity) < 0.01 }
         retarget()  // before the stillness check, or a spring whose target just moved (pointer left) pauses the timeline a poll
         wake(state != "off" || open || pressed || overTab || starting != nil
-             || ![cx, cy, fade, peek, width, press, orb, morph, depth].allSatisfy(still))
+             || ![cx, cy, fade, width, orb, morph, depth].allSatisfy(still))
         if state != "off" || resident { offSince = nil; return }
         offSince = offSince ?? now
         if now.timeIntervalSince(offSince!) > 3 { NSApp.terminate(nil) }
@@ -139,35 +137,31 @@ import SwiftUI
     /// Where every spring is heading, from the current state. Called per frame and at each poll.
     func retarget() {
         let thinking = state == "thinking"
-        // The tab belongs to a session; after a hang-up it stays until the card has landed on it. It never grows for the idle menu.
-        width.target = state != "off" || (width.value > 0.1 && cy.value >= 0.2) ? tabWidth : 0
+        // The resident app keeps the tab out (its dots are the M) until it quits; a session's notch shows it while the
+        // session runs and, after a hang-up, until the card has landed on it.
+        width.target = (resident && !quitting) || state != "off" || (width.value > 0.1 && cy.value >= 0.2) ? tabWidth : 0
         width.response = reduce ? 0.15 : state == "off" ? 0.24 : 0.3  // exits faster than it enters
         morph.target = (thinking || state == "speaking") && !muted && !reduce ? 1 : 0  // the dots cycle while waiting or speaking
         depth.target = cardDepth
         cx.target = open ? 1 : 0; cy.target = cx.target; fade.target = cx.target
         cx.response = open ? 0.26 : 0.34; cy.response = open ? 0.30 : 0.26  // see cx/cy; retargeting keeps velocity
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
-        press.target = pressed ? 0.6 : 1
-        peek.target = state == "off" && overTab && !open && !reduce ? 1 : 0
     }
 
     func step(_ now: Date) {
         let dt = min(0.05, last.map { now.timeIntervalSince($0) } ?? 0)
         last = now; t += dt
         retarget()
-        width.step(dt); morph.step(dt); depth.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); peek.step(dt); press.step(dt)
+        width.step(dt); morph.step(dt); depth.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt)
         let goal = state == "thinking" || state == "off" ? 0 : target
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }
 
     func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
-        let h = geo.height, notchX = margin + tabWidth, w = max(width.value, 0), pk = peek.value * press.value
+        let h = geo.height, notchX = margin + tabWidth, w = max(width.value, 0)
         // Card: the notch itself growing into it (cardShape), never scaled, so its corners stay round. Reduce Motion:
         // the full card cross-fades. Closing, the tail of the springs settles inside the hardware cutout, out of sight.
         if shown > 0.002 { ctx.fill(cardShape(), with: .color(.black.opacity(reduce ? fade.value : 1))) }
-        if w <= 0.1 && peek.value > 0.01 {  // idle hover: 2 pt wider each side and 4 pt deeper than the cutout
-            ctx.fill(hang(notchX - 2 * pk, notchX + geo.notchWidth + 2 * pk, h + 4 * pk, 12), with: .color(.black))
-        }
         var tab = Path()
         if w > 0.1 {
             let left = notchX - w, r = min(12, w, h / 2)

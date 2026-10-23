@@ -84,9 +84,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             if resident { try? FileManager.default.removeItem(at: Paths.appPID) }
             model.hangUp = true; model.poll()
-            guard model.busy else { return .terminateNow }  // nothing of ours to save
+            model.quitting = true  // the tab folds into the notch first
             Task { @MainActor in
                 await model.stopAndWait()
+                try? await Task.sleep(for: .milliseconds(resident ? 300 : 0))
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
             return .terminateLater

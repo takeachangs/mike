@@ -9,10 +9,11 @@ A Mac app that lives in your MacBook's notch. Click the notch to:
 - **Library**: every past call and recording as a card. Search, read,
   copy, export, or move to the Trash.
 
-While a session runs, a small tab grows out of the notch with seven white
-dots, the M from the icon: they morph through a circle while it loads or
-the voice thinks, keep turning while the voice replies, and brighten with
-your voice while it listens. Click the tab for the timer and the
+While Mike runs, a small black tab sits to the left of the notch holding
+seven white dots, the M from the icon. Click it (or the notch) for the
+actions. During a session the dots morph through a circle while it loads
+or the voice thinks, keep turning while the voice replies, and brighten
+with your voice while it listens; the card then has the timer and the
 pause/mute and stop/hang-up buttons. Short, quiet cue sounds
 mark start, pause and stop.
 
