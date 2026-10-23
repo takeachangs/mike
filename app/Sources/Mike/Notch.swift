@@ -208,7 +208,8 @@ import SwiftUI
 
     /// The m: two arches on flat feet, in order left foot, left shoulder, left top, the valley, right top, right
     /// shoulder, right foot (y down). The feet sit a little closer to the shoulders than the tops do.
-    static let mShape: [(Double, Double)] = [(-7, 4.75), (-7, -0.75), (-3.5, -4.75), (0, -0.25), (3.5, -4.75), (7, -0.75), (7, 4.75)]
+    // Sits 0.75 above the geometric centre: two feet make it look low when it is centred exactly.
+    static let mShape: [(Double, Double)] = [(-7, 4), (-7, -1.5), (-3.5, -5.5), (0, -1), (3.5, -5.5), (7, -1.5), (7, 4)]
     /// The circle of 7, turned by `turn`: each dot takes the slot nearest its own angle (the valley takes the top), so
     /// the glide between them expands outward instead of crossing.
     static func circle(_ turn: Double) -> [(Double, Double)] {
