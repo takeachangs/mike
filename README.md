@@ -2,9 +2,6 @@
 <h1 align="center">Mike</h1>
 <p align="center">Calls, lectures and a library — living in your notch</p>
 <p align="center">
-  <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple&logoColor=white" alt="macOS 14+">
-</p>
-<p align="center">
   <a href="https://github.com/takeachangs/mike/releases/latest/download/Mike.dmg"><img src="https://img.shields.io/badge/Download-macOS-black?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS"></a>
 </p>
 
