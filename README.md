@@ -1,6 +1,12 @@
-# Mike
+<p align="center"><img src="docs/icon.png" width="128" alt="Mike"></p>
+<h1 align="center">Mike</h1>
+<p align="center">Calls, lectures and a library — living in your notch</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple&logoColor=white" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/localized-English-black" alt="Localized in English">
+</p>
 
-A Mac app that lives in your MacBook's notch. Click the notch to:
+Click the notch to:
 
 - **Call**: talk to OpenAI's GPT-Live voice model (bring your own API key).
 - **Listen**: transcribe a lecture or meeting live, on this Mac. The speech
