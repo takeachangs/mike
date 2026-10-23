@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: app/.build
-          key: spm-${{ runner.os }}-${{ hashFiles('app/Package.resolved') }}
+          key: spm-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('app/Package.resolved') }}  # the repo name: .build bakes in absolute paths, so a rename needs a fresh cache
 
       - name: Unit tests
         working-directory: app
