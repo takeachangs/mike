@@ -23,6 +23,21 @@ if resident, let other = (try? String(contentsOf: Paths.appPID, encoding: .utf8)
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)  // no Dock icon; LSUIElement in Info.plist says the same for the bundle
+// Never shown (no menu bar for an accessory app), but ⌘X/C/V/A/Z in text fields (the API key) only work through it.
+app.mainMenu = {
+    let edit = NSMenu(title: "Edit")
+    edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+    edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+    edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+    edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+    edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+    let item = NSMenuItem(), main = NSMenu()
+    item.submenu = edit
+    main.addItem(NSMenuItem())  // the app menu slot comes first
+    main.addItem(item)
+    return main
+}()
 if resident, let v = UserDefaults.standard.object(forKey: "soundVolume") as? Double { Cue.level = v }
 
 let model = MainActor.assumeIsolated { Notch(resident: resident, envPID: envPID, recorderMode: env["CALL_NOTCH_MODE"] == "listen") }
