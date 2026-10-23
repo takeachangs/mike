@@ -62,7 +62,6 @@ if resident {
     let args = CommandLine.arguments
     let testAudio = args.firstIndex(of: "--test-audio").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
     MainActor.assumeIsolated {
-        _ = Dictation(model)  // its key monitors keep it alive
         if args.contains("--listen") { model.launch(listen: true, testAudio: testAudio) }
         else if !UserDefaults.standard.bool(forKey: "onboarded") { Windows.settings(welcome: true) }
     }
