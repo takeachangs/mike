@@ -54,7 +54,9 @@ public final class LiveCall: @unchecked Sendable {
     private let q = DispatchQueue(label: "mike.call")
     private let meter = OSAllocatedUnfairLock(initialState: Meter())
     private let ticker: StateTicker
-    private let mic = AVAudioEngine(), out = AVAudioEngine(), player = AVAudioPlayerNode()
+    // One engine for mic and speaker: voice processing cancels echo only against playback in the same I/O unit.
+    private let engine = AVAudioEngine(), player = AVAudioPlayerNode()
+    private var voiceProcessing = false
     private var micPending = Data()  // tap thread only
     private var audioOn = false
     private var observers: [NSObjectProtocol] = []
@@ -296,30 +298,40 @@ public final class LiveCall: @unchecked Sendable {
         guard let float = AVAudioFormat(standardFormatWithSampleRate: Double(LiveProtocol.rate), channels: 1) else {
             throw LiveCallError(message: "no 24 kHz audio format")
         }
-        out.attach(player)
-        out.connect(player, to: out.mainMixerNode, format: float)
-        try out.start()
-        player.play()
-        try startMic()
-        // A new default device (AirPods connecting) stops an engine: start it again on the new one.
-        observers = [mic, out].map { engine in
-            NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [self] _ in
-                q.async { self.restart(engine) }
-            }
+        // Echo cancellation and noise suppression (also ducks other audio and applies AGC). Before the graph is built and
+        // the engine runs; if the OS refuses, the call goes on without it. The cue sounds (afplay) are not cancelled.
+        do { try engine.inputNode.setVoiceProcessingEnabled(true); voiceProcessing = true } catch {
+            Log.call.error("voice processing off: \(error.localizedDescription, privacy: .public)")
         }
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: float)
+        try startMic()
+        player.play()
+        // A new default device (AirPods connecting) stops the engine: start it again on the new one.
+        observers = [NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [self] _ in
+            q.async { self.restart() }
+        }]
     }
 
     private func startMic() throws {
-        let input = mic.inputNode, format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0,
-              let pcm = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(LiveProtocol.rate), channels: 1, interleaved: true),
-              let conv = AVAudioConverter(from: format, to: pcm) else { throw LiveCallError(message: "No usable microphone") }
-        conv.downmix = true
+        // Read after voice processing is on: it changes the input's rate and channel count.
+        let input = engine.inputNode, format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0, let conv = LiveCall.micConverter(from: format, voice: voiceProcessing)
+        else { throw LiveCallError(message: "No usable microphone") }
         input.removeTap(onBus: 0)
         micPending = Data()
         input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(format.sampleRate / 10), format: format) { [self] buf, _ in take(buf, conv) }
-        mic.prepare()
-        try mic.start()
+        engine.prepare()
+        try engine.start()
+    }
+
+    /// Mic format -> 24 kHz mono PCM16. Voice processing can hand over many channels with the cleaned mic on the first
+    /// and the rest empty, which a downmix would average down to a fraction of the level: take channel 0 then.
+    static func micConverter(from format: AVAudioFormat, voice: Bool) -> AVAudioConverter? {
+        guard let pcm = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(LiveProtocol.rate), channels: 1, interleaved: true),
+              let conv = AVAudioConverter(from: format, to: pcm) else { return nil }
+        if voice && format.channelCount > 1 { conv.channelMap = [0] } else { conv.downmix = true }
+        return conv
     }
 
     /// Tap thread: resample to 24 kHz mono PCM16, then level, idle clock and input_audio.append per 100 ms.
@@ -368,18 +380,14 @@ public final class LiveCall: @unchecked Sendable {
         }
     }
 
-    private func restart(_ engine: AVAudioEngine) {
+    private func restart() {
         guard phase == .live || phase == .closing else { return }
         do {
-            if engine === mic {
-                mic.stop()
-                try startMic()
-            } else {
-                player.stop()  // drops what was scheduled, so forget those slices
-                meter.withLock { $0.slices.removeAll(); $0.playEnd = 0 }
-                try out.start()
-                player.play()
-            }
+            engine.stop()
+            player.stop()  // drops what was scheduled, so forget those slices
+            meter.withLock { $0.slices.removeAll(); $0.playEnd = 0 }
+            try startMic()
+            player.play()
             Log.call.info("audio device changed, restarted")
         } catch {
             report("Audio device change failed: \(error.localizedDescription)")
@@ -392,9 +400,8 @@ public final class LiveCall: @unchecked Sendable {
         audioOn = false
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
-        mic.inputNode.removeTap(onBus: 0)
-        mic.stop()
+        engine.inputNode.removeTap(onBus: 0)
         player.stop()
-        out.stop()
+        engine.stop()
     }
 }
