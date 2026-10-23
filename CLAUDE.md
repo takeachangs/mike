@@ -82,7 +82,7 @@ Changing any of these means changing every side in the same commit.
 
 - No echo cancellation in either call path: on laptop speakers the voice can hear itself and the cue sounds. Headphones avoid it.
 - Audio already queued keeps playing after the user interrupts the voice.
-- A recording and a call both own `state.json`; run one at a time (the app enforces this for its own sessions).
+- A recording and a call both own `state.json`; run one at a time (the app enforces this for its own sessions, and the /listen skill follows a live recording rather than starting one; the `Listen` command itself does not check).
 - Recording minute stamps count audio samples: a gap (an input device switch, the Mac sleeping) shifts later stamps earlier by its length.
 - Signing is ad-hoc unless `SIGN_IDENTITY` is set; an ad-hoc app runs only on the Mac that built it, and after each rebuild macOS may ask again for microphone and Keychain access.
 - `drive.py` ignores a running resident app, so with one up you see two notches during the drive.
