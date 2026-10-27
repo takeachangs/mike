@@ -167,8 +167,9 @@ struct Detail: View {
 
 /// Settings: what the app needs and why. First launch shows Setup instead.
 struct SettingsView: View {
-    @State private var key = Keychain.stored ?? ""
+    @State private var key = ""
     @State private var keySaved = Keychain.hasOpenAIKey
+    @State private var replacing = false
     @AppStorage("soundVolume") private var volume = 0.25
     @AppStorage("silenceHangUp") private var silence = 30.0
     @State private var loginItem = SMAppService.mainApp.status == .enabled
@@ -233,13 +234,24 @@ struct SettingsView: View {
                 // Everything a future paywall gates lives in this tab (see the paywall issue), so gating it is a single `if`.
                 Form {
                     Section {
-                        SecureField("OpenAI API key", text: $key, prompt: Text("sk-…"))
-                            .onChange(of: key) { keySaved = false }
-                        HStack {
-                            Button(keySaved ? "Saved" : "Save key") { keySaved = Keychain.setOpenAIKey(key) }.disabled(keySaved)
-                            if ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?.isEmpty == false {
-                                Text("OPENAI_API_KEY from the environment is used first.").font(.caption).foregroundStyle(.secondary)
+                        // The saved key is never read back here: reading it can ask for the login password (Keychain.hasOpenAIKey).
+                        if keySaved && !replacing {
+                            LabeledContent("OpenAI API key") {
+                                HStack {
+                                    Text("A key is saved").foregroundStyle(.secondary)
+                                    Button("Replace") { replacing = true }
+                                    Button("Remove", role: .destructive) { if Keychain.setOpenAIKey("") { keySaved = false } }
+                                }
                             }
+                        } else {
+                            SecureField("OpenAI API key", text: $key, prompt: Text("sk-…"))
+                            HStack {
+                                Button("Save key") { if Keychain.setOpenAIKey(key) { keySaved = true; replacing = false; key = "" } }.disabled(key.isEmpty)
+                                if replacing { Button("Cancel") { replacing = false; key = "" } }
+                            }
+                        }
+                        if ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?.isEmpty == false {
+                            Text("OPENAI_API_KEY from the environment is used first.").font(.caption).foregroundStyle(.secondary)
                         }
                         Picker("Hang up after silence", selection: $silence) {
                             Text("Never").tag(0.0); Text("15 seconds").tag(15.0); Text("30 seconds").tag(30.0)
