@@ -11,21 +11,23 @@ import UniformTypeIdentifiers
 
     static func library() { show("library", "Library", CGSize(width: 900, height: 600), Library()) }
     static func settings() { show("settings", "Settings", CGSize(width: 520, height: 440), SettingsView()) }
-    static func setup() {
-        if open["setup"]?.isVisible == false { open["setup"] = nil }  // a closed one starts over at Welcome
-        show("setup", "Welcome to Mike", CGSize(width: 760, height: 540), Setup())
+    /// Kept (with its step) when closed mid-setup, so reopening resumes; only Done drops it.
+    static func setup() { show("setup", "Welcome to Mike", CGSize(width: 760, height: 540), Setup(), resizable: false) }
+    static func finishSetup() {
+        open["setup"]?.close()
+        open["setup"] = nil
     }
 
-    private static func show(_ id: String, _ title: String, _ size: CGSize, _ view: some View) {
+    private static func show(_ id: String, _ title: String, _ size: CGSize, _ view: some View, resizable: Bool = true) {
         let w = open[id] ?? {
-            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: NSWindow.StyleMask([.titled, .closable, .miniaturizable]).union(resizable ? .resizable : []),
                              backing: .buffered, defer: false)
             w.isReleasedWhenClosed = false
             w.contentView = NSHostingView(rootView: view)
             w.center()
             open[id] = w
             // The last window closing hides the Dock icon again (the notch panel is not one of these).
-            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak w] _ in
                 MainActor.assumeIsolated {
                     if !open.values.contains(where: { $0 !== w && $0.isVisible }) { NSApp.setActivationPolicy(.accessory) }
                 }
@@ -206,7 +208,7 @@ struct SettingsView: View {
                             }
                         }
                         Toggle("Open at login", isOn: $loginItem)
-                            .onChange(of: loginItem) { setLoginItem(loginItem) }
+                            .onChange(of: loginItem) { if !setLoginItem(loginItem) { loginItem = SMAppService.mainApp.status == .enabled } }
                             .disabled(Bundle.main.bundleIdentifier == nil)
                         LabeledContent("Data folder") { Button("Show in Finder") { NSWorkspace.shared.open(Paths.stateDir) } }
                         LabeledContent("Setup") { Button("Run setup again…") { Windows.setup() } }
@@ -268,12 +270,15 @@ struct SettingsView: View {
         }
     }
 
-    func setLoginItem(_ on: Bool) {
-        do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() } catch {
-            loginItem = SMAppService.mainApp.status == .enabled
-            NSAlert(error: error).runModal()
-        }
+}
+
+/// Turns opening at login on or off (Settings and Setup's Done); false, after showing why, when that failed.
+@MainActor @discardableResult func setLoginItem(_ on: Bool) -> Bool {
+    do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() } catch {
+        NSAlert(error: error).runModal()
+        return false
     }
+    return true
 }
 
 let appVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
