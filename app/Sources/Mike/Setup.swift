@@ -16,6 +16,7 @@ struct Setup: View {
     @State private var askedAX = false
     @State private var key = ""
     @State private var tried = ""
+    @State private var warmed = Dictation.warmed
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var blocked: Bool { (step == 1 && mic != .authorized) || (step == 3 && dictation && !trusted) }
@@ -65,8 +66,9 @@ struct Setup: View {
             .padding(.horizontal, 48).padding(.top, 32).padding(.bottom, 24)
         }
         .frame(width: 760, height: 540)
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            mic = AVCaptureDevice.authorizationStatus(for: .audio)  // back from System Settings
+        .task(id: download == 1) {  // load the model once it's on disk, so Try it doesn't wait out the first load
+            guard download == 1, !warmed else { return }
+            do { try await Dictation.warm(); warmed = true } catch { download = nil }  // offers the download again
         }
     }
 
@@ -158,26 +160,33 @@ struct Setup: View {
                 Text("Kept in your Keychain, never in a file.").font(.caption).foregroundStyle(.secondary)
             case 5:
                 header(5, "Try it")
-                prose("Click in the box, then hold right ⌘ and say something. The m in your notch opens into a circle when it's listening.")
-                // A real dictation: the paste's ⌘V lands here through the hidden Edit menu (main.swift).
-                TextEditor(text: $tried).font(.system(size: 14)).scrollContentBackground(.hidden)
-                    .padding(8).frame(height: 90)
-                    .overlay(alignment: .topLeading) {
-                        if tried.isEmpty { Text("Your words appear here.").font(.system(size: 14)).foregroundStyle(.tertiary).padding(13).allowsHitTesting(false) }
-                    }
+                if warmed {
+                    prose("Click in the box, then hold right ⌘ and say something. The m in your notch opens into a circle when it's listening.")
+                } else if download == 1 {
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); prose("Preparing the speech model…") }
+                } else {
+                    prose("The speech model isn't downloaded yet. Go back to download it, or skip the test.")
+                }
+                // A real dictation: the paste's ⌘V lands here through the hidden Edit menu (main.swift). A field's own
+                // prompt rather than an overlay on a TextEditor, so the placeholder starts exactly where the text does.
+                TextField("Try it", text: $tried, prompt: Text("Your words appear here."), axis: .vertical)
+                    .textFieldStyle(.plain).labelsHidden().font(.system(size: 14)).lineLimit(3...)
+                    .padding(12)
                     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
             default:
                 heading("You're set.", size: 26).padding(.top, 24)
                 prose("Click the notch any time for Call, Listen, Library and Settings. Hold right ⌘ anywhere to dictate.")
             }
         }
-        .task(id: step) {  // Accessibility has no change notification: poll while its step shows
-            guard step == 3 else { return }
-            while !Task.isCancelled && !trusted {
+        .task(id: step) {  // neither grant has a change notification: poll while its step shows
+            guard step == 1 || step == 3 else { return }
+            while !Task.isCancelled {
+                let m = AVCaptureDevice.authorizationStatus(for: .audio), t = AXIsProcessTrusted()
+                if t && !trusted { model.installDictationTap() }  // now, rather than on main.swift's next 2 s tick
+                if (m == .authorized && mic != .authorized) || (t && !trusted) { Windows.setup() }  // back from System Settings
+                mic = m; trusted = t
                 try? await Task.sleep(for: .seconds(1))
-                trusted = AXIsProcessTrusted()
             }
-            if trusted { model.installDictationTap() }  // now, rather than on main.swift's next 2 s tick
         }
     }
 

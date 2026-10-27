@@ -81,6 +81,8 @@ if resident {
         if args.contains("--listen") { model.launch(listen: true, testAudio: testAudio) }
         else if !UserDefaults.standard.bool(forKey: "onboarded") { Windows.setup() }
         model.installDictationTap()
+        // Loaded now rather than on the first right ⌘, so the first dictation doesn't wait out the model load.
+        if Notch.dictationOn && Recorder.modelsOnDisk { Task { try? await Dictation.warm() } }
     }
     // Until Accessibility is granted (or dictation turned on), keep trying, so it starts working without a relaunch.
     Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in MainActor.assumeIsolated { model.installDictationTap() } }

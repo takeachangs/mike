@@ -24,9 +24,17 @@ import UniformTypeIdentifiers
             w.contentView = NSHostingView(rootView: view)
             w.center()
             open[id] = w
+            // The last window closing hides the Dock icon again (the notch panel is not one of these).
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+                MainActor.assumeIsolated {
+                    if !open.values.contains(where: { $0 !== w && $0.isVisible }) { NSApp.setActivationPolicy(.accessory) }
+                }
+            }
             return w
         }()
         w.title = title
+        // A Dock icon and a ⌘-Tab entry while a window is up, so it can be found again after System Settings.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()  // macOS 14 dropped activate(ignoringOtherApps:): the old call left the window behind
         w.makeKeyAndOrderFront(nil)
         w.orderFrontRegardless()
