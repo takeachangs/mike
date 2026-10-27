@@ -243,7 +243,7 @@ struct Setup: View {
         }
         .task(id: step) {
             headingFocused = true  // VoiceOver lands on the new step's heading
-            if step == 4 { hasKey = Keychain.stored != nil }  // read here, not at open: an ad-hoc build may ask for Keychain access
+            if step == 4 { hasKey = Keychain.hasOpenAIKey }  // existence only: reading the key may ask for the login password
             if step == 5 { fieldFocused = true }
             // Neither grant has a change notification: poll while a step that needs them shows. Try it also watches the
             // dictation end, to say so when nothing arrived.

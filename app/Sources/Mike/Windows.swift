@@ -168,7 +168,7 @@ struct Detail: View {
 /// Settings: what the app needs and why. First launch shows Setup instead.
 struct SettingsView: View {
     @State private var key = Keychain.stored ?? ""
-    @State private var keySaved = Keychain.stored != nil
+    @State private var keySaved = Keychain.hasOpenAIKey
     @AppStorage("soundVolume") private var volume = 0.25
     @AppStorage("silenceHangUp") private var silence = 30.0
     @State private var loginItem = SMAppService.mainApp.status == .enabled

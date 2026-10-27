@@ -19,6 +19,15 @@ public enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
+    /// Whether a key is saved, without reading it: reading the secret of an item an earlier (differently signed) build
+    /// saved asks for the login password, a lookup of its attributes doesn't.
+    public static var hasOpenAIKey: Bool {
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                kSecAttrAccount as String: account, kSecReturnAttributes as String: true,
+                                kSecMatchLimit as String: kSecMatchLimitOne]
+        return SecItemCopyMatching(q as CFDictionary, nil) == errSecSuccess
+    }
+
     /// Saves the key, or removes it when empty. Returns false when the Keychain refused.
     @discardableResult public static func setOpenAIKey(_ key: String) -> Bool {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
