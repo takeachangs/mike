@@ -88,8 +88,10 @@ struct Setup: View {
         HStack(spacing: 10) {
             ZStack {
                 Circle().fill(i < step ? AnyShapeStyle(.green) : i == step ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                // Numbered like the headers: Welcome and Done aren't steps, so they get a symbol
                 if i < step { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)) }
-                else { Text("\(i + 1)").font(.system(size: 11, weight: .semibold)) }
+                else if i == 0 || i == 6 { Image(systemName: i == 0 ? "hand.wave.fill" : "flag.checkered").font(.system(size: 9, weight: .semibold)) }
+                else { Text("\(i)").font(.system(size: 11, weight: .semibold)) }
             }
             .foregroundStyle(i <= step ? .white : .secondary)
             .frame(width: 20, height: 20)
