@@ -3,6 +3,7 @@
 //   Settings / Quit. Calls (GPT-Live) and recordings (Parakeet Ultra, on-device) run inside the app, and it shows any
 //   other session too (a skill's /call or /listen) from ~/.mike/state.json. Its pid goes in app.pid so those
 //   sessions do not start a second notch.
+//   Holding or tapping the right ⌘ key dictates into the focused app (Dictate.swift).
 //   `open -a Mike --args --listen` starts a recording right away; `--test-audio <file>` records a file played in
 //   real time instead of the mic (for testing without speaking).
 // - Launched by a session with CALL_BRIDGE_PID (bridge.py, the Listen CLI, notch/drive.py) it is only that session's
@@ -79,7 +80,10 @@ if resident {
     MainActor.assumeIsolated {
         if args.contains("--listen") { model.launch(listen: true, testAudio: testAudio) }
         else if !UserDefaults.standard.bool(forKey: "onboarded") { Windows.settings(welcome: true) }
+        model.installDictationTap()
     }
+    // Until Accessibility is granted (or dictation turned on), keep trying, so it starts working without a relaunch.
+    Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in MainActor.assumeIsolated { model.installDictationTap() } }
 }
 
 /// Every way out goes through NSApp.terminate: the card's Quit, SIGTERM (bridge.py on hang-up, install.sh), logout,

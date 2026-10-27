@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 # What this is
 
-Mike, a Mac app that lives in the MacBook notch. On its own it makes plain GPT-Live voice calls (`gpt-live-1`, user's own OpenAI key), records lectures with on-device transcription (Parakeet Ultra via FluidAudio), and keeps a Library of both. It is also the notch for a coding-agent workflow: `bridge.py` runs agent-mode calls (client delegation, answered by an agent session on a notes folder) and the `Listen` command records for the `/listen` skill. `README.md` is the human overview, `SETUP.md` is the agent-mode install procedure for a coding agent.
+Mike, a Mac app that lives in the MacBook notch. On its own it makes plain GPT-Live voice calls (`gpt-live-1`, user's own OpenAI key), records lectures with on-device transcription (Parakeet Ultra via FluidAudio), keeps a Library of both, and dictates into any app on the right ⌘ key. It is also the notch for a coding-agent workflow: `bridge.py` runs agent-mode calls (client delegation, answered by an agent session on a notes folder) and the `Listen` command records for the `/listen` skill. `README.md` is the human overview, `SETUP.md` is the agent-mode install procedure for a coding agent.
 
 # Layout
 
@@ -12,11 +12,12 @@ Mike, a Mac app that lives in the MacBook notch. On its own it makes plain GPT-L
 app/Package.swift                    one SwiftPM package; FluidAudio is its only dependency
 app/Sources/MikeKit/            the library everything else is built on
   Recorder.swift                       mic (or a file played in real time) -> Parakeet Ultra -> per-minute transcript; state file; cues
+  Dictation.swift                      the right-⌘ hold/tap/Esc rules (DictationKey), and mic-into-memory -> Parakeet in one pass, model kept loaded
   LiveCall.swift, LiveProtocol.swift   the solo GPT-Live call: WebSocket protocol codec, mic/speaker audio, state file, transcript file
   StateFile.swift, Paths.swift         ~/.mike paths, the state file and its 20 Hz ticker, os.Logger categories
   Sessions.swift, Transcript.swift     Library parsing of saved sessions; the per-minute transcript builder
   Cues.swift, Keychain.swift           cue sounds (Resources/sounds, played with afplay); the OpenAI key in the Keychain
-app/Sources/Mike/               the app: notch panel and drawing, in-app sessions (Launch.swift), Library and Settings windows
+app/Sources/Mike/               the app: notch panel and drawing (the dictation aura too), in-app sessions (Launch.swift), dictation's key tap and paste (Dictate.swift), Library and Settings windows
 app/Sources/Listen/main.swift        the recorder as a command for the /listen skill; launches the notch if no resident app is up
 app/Tests/MikeKitTests/         swift-testing unit tests for the library
 app/Resources/                       Info.plist template, entitlements, AppIcon.icns
@@ -48,6 +49,7 @@ uv run bridge.py say  ID "text" / note ID "text"    # spoken result / quiet prog
 - **App, solo call**: Settings' key (or `OPENAI_API_KEY`) -> `LiveCall` in the app process. Hang-up is the card's button, the voice saying the sign-off, or silence (Settings: Never / 15-90 s, default 30): silence means no transcribed user words and no voice audio, never mic loudness, with the `wait` cue 10 s before, and a muted call never times out. The transcript is saved like bridge.py's.
 - **App, recording**: `Recorder` in the app process, into `~/.mike/listen-<stamp>.txt`. The model downloads on first use with progress in the card (or ahead of time from Settings).
 - **Agent-mode call**: `bridge.py` opens the Live session (seeding `context.txt`, capped at 4000 characters), writes delegations `{"id", "offset_ms", "transcript"}` to the inbox, forwards the agent's `say` / `note` from the outbox, and on hang-up (Ctrl-C, the notch's button, the sign-off, 60 s idle after a nudge at 30 s) writes `{"event": "closed", "seconds", "transcript"}` to the inbox and saves the transcript file.
+- **App, dictation**: a CGEventTap (needs Accessibility) watches right ⌘ alone; hold to talk, tap to latch and tap to stop, Esc cancels a latched one (swallowed), a chord is a shortcut and discards the capture. On stop the clip is transcribed in one pass and pasted with a synthesized ⌘V, the pasteboard restored 0.5 s later. Ignored while a call or recording runs; never writes the state file. Settings toggles it (`dictation`, default on).
 - **Skill recording**: `Listen <path>` (the binary inside Mike.app, or `app/.build/release/Listen`), stopped by Ctrl-C or the notch's stop button.
 
 # Contracts that must not drift
@@ -84,6 +86,7 @@ Changing any of these means changing every side in the same commit.
 - Audio already queued keeps playing after the user interrupts the voice.
 - A recording and a call both own `state.json`; run one at a time (the app enforces this for its own sessions).
 - Recording minute stamps count audio samples: a gap (an input device switch, the Mac sleeping) shifts later stamps earlier by its length.
-- Signing is ad-hoc unless `SIGN_IDENTITY` is set; an ad-hoc app runs only on the Mac that built it, and after each rebuild macOS may ask again for microphone and Keychain access.
+- Signing is ad-hoc unless `SIGN_IDENTITY` is set; an ad-hoc app runs only on the Mac that built it, and after each rebuild macOS may ask again for microphone and Keychain access, and Accessibility (dictation) has to be re-allowed.
+- Dictation starts the mic on right-⌘ down, so a right-⌘ shortcut briefly lights the mic indicator. Its ⌘V is key code 9, V on ANSI layouts only.
 - `drive.py` ignores a running resident app, so with one up you see two notches during the drive.
 - `seconds` is null when `session.closed` never arrives within 5 s and no usage update came before.

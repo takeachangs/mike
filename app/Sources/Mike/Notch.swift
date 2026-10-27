@@ -25,6 +25,10 @@ import SwiftUI
     // narrowing into the cutout). Responses are set per direction in step(). Reduce Motion cross-fades instead (fade).
     var cx = Spring(0, response: 0.26), cy = Spring(0, response: 0.30), fade = Spring(0, response: 0.2)
     var orb = Spring(1, response: 0.1)  // the dots' hover grow and press shrink
+    // Dictation (Dictate.swift): the key tap and its rules, the capture, and the aura they light around the notch.
+    var tap: CFMachPort?, keys = DictationKey(), dictation: Dictation?, transcribing = false, dictatedAt = Date.distantPast
+    var aura = Spring(0, response: 0.4), spread = Spring(1, response: 0.4), sheen = Spring(0, response: 0.3), voice = 0.0
+    var auraOut = 0.6  // how the aura leaves: slow and spreading after an insert, quick and drawn in after a cancel
     /// False when nothing is drawn or moving: the view's timeline pauses, so an idle app costs no frames.
     @Published var awake = true
 
@@ -92,7 +96,7 @@ import SwiftUI
         if resident { panel.ignoresMouseEvents = !(open || overTab) }  // beside the notch, clicks reach the menu bar
         // ponytail: the 20 Hz sample above can lag a very fast move-and-click onto the notch by up to 50 ms
         guard open else {
-            if shown < 0.02, panel.frame != geo.collapsed { panel.setFrame(geo.collapsed, display: true) }
+            if shown < 0.02, aura.value < 0.002, dictation == nil, panel.frame != geo.collapsed { panel.setFrame(geo.collapsed, display: true) }
             return
         }
         if CGRect(x: 0, y: 0, width: geo.collapsed.width, height: geo.height).contains(pt)
@@ -124,8 +128,8 @@ import SwiftUI
         reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         func still(_ s: Spring) -> Bool { abs(s.value - s.target) < 0.001 && abs(s.velocity) < 0.01 }
         retarget()  // before the stillness check, or a spring whose target just moved (pointer left) pauses the timeline a poll
-        wake(state != "off" || open || pressed || overTab || starting != nil
-             || ![cx, cy, fade, width, orb, morph, depth, round, dock].allSatisfy(still))
+        wake(state != "off" || open || pressed || overTab || starting != nil || dictation != nil || transcribing
+             || ![cx, cy, fade, width, orb, morph, depth, round, dock, aura, spread, sheen].allSatisfy(still))
         if state != "off" || resident { offSince = nil; return }
         offSince = offSince ?? now
         if now.timeIntervalSince(offSince!) > 3 { NSApp.terminate(nil) }
@@ -162,6 +166,14 @@ import SwiftUI
         cx.target = open ? 1 : 0; cy.target = cx.target; fade.target = cx.target
         cx.response = open ? 0.26 : 0.34; cy.response = open ? 0.30 : 0.26  // see cx/cy; retargeting keeps velocity
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
+        // The aura waits out the first 120 ms, so right ⌘ in a shortcut (⌘C) never lights it. Transcribing it settles
+        // lower with a sheen; then it leaves the way auraOut says. Reduce Motion: it only fades.
+        let heard = dictation != nil && Date().timeIntervalSince(dictatedAt) > 0.12, busy = heard || transcribing
+        aura.target = heard ? 1 : transcribing ? 0.6 : 0
+        aura.response = busy ? 0.4 : reduce ? 0.2 : auraOut
+        spread.target = busy || reduce ? 1 : auraOut < 0.3 ? 0.6 : 1.6
+        spread.response = aura.response
+        sheen.target = transcribing && !reduce ? 1 : 0
     }
 
     func step(_ now: Date) {
@@ -169,12 +181,16 @@ import SwiftUI
         last = now; t += dt
         retarget()
         width.step(dt); morph.step(dt); depth.step(dt); round.step(dt); cx.step(dt); cy.step(dt); fade.step(dt); orb.step(dt); dock.step(dt)
+        aura.step(dt); spread.step(dt); sheen.step(dt)
+        let heard = reduce ? 0 : dictation?.level ?? 0
+        voice += (heard - voice) * (1 - pow(1 - (heard > voice ? 0.3 : 0.08), dt * 60))  // softer than the dots: the aura breathes
         let goal = state == "thinking" || state == "off" ? 0 : target
         level += (goal - level) * (1 - pow(1 - (goal > level ? 0.55 : 0.18), dt * 60))  // fast attack, slow release
     }
 
     func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
         let h = geo.height, notchX = margin + tabWidth, w = max(width.value, 0)
+        drawAura(&ctx)
         // Card: the notch itself growing into it (cardShape), never scaled, so its corners stay round. Reduce Motion:
         // the full card cross-fades. Closing, the tail of the springs settles inside the hardware cutout, out of sight.
         if shown > 0.002 { ctx.fill(cardShape(), with: .color(.black.opacity(reduce ? fade.value : 1))) }
@@ -228,6 +244,36 @@ import SwiftUI
             dots.fill(Path(ellipseIn: CGRect(x: x - d / 2, y: y - d / 2, width: d, height: d)), with: .color(.white.opacity(a)))
         }
     }
+
+    /// While dictating: light around the closed notch's outline, under the black so only the outside shows. A soft
+    /// blue-violet-pink-amber edge glow (Apple Intelligence's colours, quieter) that drifts slowly and swells and
+    /// brightens with your voice; a bright line rides the edge. Transcribing, it dims and a sheen sweeps across.
+    func drawAura(_ ctx: inout GraphicsContext) {
+        let a = min(max(aura.value, 0), 1)
+        guard a > 0.002 else { return }
+        let (l, r) = closedEdges(), h = geo.height, shape = hang(l, r, h, 12), k = max(spread.value, 0)
+        let drift = reduce ? 0 : (r - l) * 0.35 * sin(2 * .pi * t / 9)
+        let light = GraphicsContext.Shading.linearGradient(Gradient(colors: Notch.auraColors), startPoint: CGPoint(x: l + drift, y: 0),
+                                                           endPoint: CGPoint(x: r + drift, y: h))
+        var glow = ctx
+        glow.addFilter(.blur(radius: (10 + 6 * voice) * k))  // stays inside the 52 pt either side of the notch
+        glow.opacity = a * (0.5 + 0.5 * voice)
+        glow.stroke(shape, with: light, lineWidth: 6 * k)
+        var rim = ctx
+        rim.addFilter(.blur(radius: 1.5))
+        rim.opacity = a * 0.9
+        rim.stroke(shape, with: light, lineWidth: 2)
+        let s = min(max(sheen.value, 0), 1)
+        guard s > 0.002 else { return }
+        let x = l - 40 + (r - l + 80) * (t / 1.6).truncatingRemainder(dividingBy: 1)  // left to right every 1.6 s
+        var band = ctx
+        band.addFilter(.blur(radius: 4))
+        band.opacity = s * 0.8
+        band.stroke(shape, with: .linearGradient(Gradient(colors: [.clear, .white, .clear]), startPoint: CGPoint(x: x - 30, y: 0),
+                                                 endPoint: CGPoint(x: x + 30, y: 0)), lineWidth: 3)
+    }
+    static let auraColors = [Color(red: 0.55, green: 0.62, blue: 1), Color(red: 0.74, green: 0.51, blue: 0.95),
+                             Color(red: 0.96, green: 0.73, blue: 0.92), Color(red: 1, green: 0.73, blue: 0.44)]
 
     /// The m: two arches on flat feet, in order left foot, left shoulder, left top, the valley, right top, right
     /// shoulder, right foot (y down). The feet sit a little closer to the shoulders than the tops do.

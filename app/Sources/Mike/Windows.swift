@@ -164,6 +164,8 @@ struct SettingsView: View {
     @State private var loginItem = SMAppService.mainApp.status == .enabled
     @State private var mic = AVCaptureDevice.authorizationStatus(for: .audio)
     @State private var model: String? = Recorder.modelsOnDisk ? "Downloaded" : nil
+    @AppStorage("dictation") private var dictation = true
+    @State private var trusted = AXIsProcessTrusted()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -182,6 +184,15 @@ struct SettingsView: View {
                             default: Button("Open Privacy Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }
                             }
                         }
+                    }
+                    Section {
+                        Toggle("Dictate with the right ⌘ key", isOn: $dictation)
+                        LabeledContent("Accessibility") {
+                            if trusted { Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+                            else { Button("Open Accessibility Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!) } }
+                        }
+                    } header: { Text("Dictation") } footer: {
+                        Text("Hold right ⌘ and speak, or tap it to start and tap again to stop; Esc cancels. The words are transcribed on this Mac and typed where your cursor is, which needs Accessibility access.")
                     }
                     Section("General") {
                         LabeledContent("Sound volume") {
@@ -244,7 +255,8 @@ struct SettingsView: View {
                 .padding(.bottom, 16)
             }
         }
-        .onAppear { mic = AVCaptureDevice.authorizationStatus(for: .audio) }
+        .onAppear { mic = AVCaptureDevice.authorizationStatus(for: .audio); trusted = AXIsProcessTrusted() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in trusted = AXIsProcessTrusted() }
     }
 
     func download() {
