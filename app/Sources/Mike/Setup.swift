@@ -369,7 +369,7 @@ struct Setup: View {
     /// Joins one already running (Settings, a recording, dictation) rather than starting a second.
     func fetchModel() {
         downloadError = nil
-        if Recorder.modelProgress == nil, let free = Recorder.modelVolumeFree, free < 1_200_000_000 {  // the download plus its compiled copy
+        if Recorder.modelProgress == nil, !Recorder.modelsOnDisk, let free = Recorder.modelVolumeFree, free < 1_200_000_000 {  // the download plus its compiled copy
             downloadError = "Needs about 1.2 GB free on this Mac."
             return
         }
