@@ -35,6 +35,7 @@ app.mainMenu = {
     edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
     // The app menu slot comes first; it shows while a window makes the app regular (Windows.show), so ⌘Q quits there.
     let appMenu = NSMenu()
+    appMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
     appMenu.addItem(withTitle: "Quit Mike", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     let first = NSMenuItem(), item = NSMenuItem(), main = NSMenu()
     first.submenu = appMenu

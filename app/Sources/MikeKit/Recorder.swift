@@ -20,6 +20,25 @@ extension SlidingWindowAsrManager {
     var fullText: String { [confirmedTranscript, volatileTranscript].filter { !$0.isEmpty }.joined(separator: " ") }
 }
 
+/// The model load as the user sees it: downloading with a fraction, then preparing (compiling for the Neural Engine).
+/// FluidAudio reports each of its several per-model loads from 0 again (download 0-0.5, compile 0.5-1), and the
+/// first one fetches the whole repo, so only that first download phase is a real percentage; any compile after it
+/// is preparing, for good.
+public struct ModelProgress: Sendable, Equatable {
+    public var fraction: Double, preparing: Bool
+
+    public init(fraction: Double = 0, preparing: Bool = false) { (self.fraction, self.preparing) = (fraction, preparing) }
+
+    mutating func add(_ p: DownloadProgress) {
+        switch p.phase {
+        case .downloading(_, let files) where files > 0 && !preparing:  // no files: the cached fast path
+            fraction = max(fraction, min(1, p.fractionCompleted * 2))  // ponytail: FluidAudio's repo loads weigh download 0.5
+        case .compiling: preparing = true
+        default: break
+        }
+    }
+}
+
 /// One live transcription: microphone (or a file played in real time) -> Parakeet Ultra on the Neural Engine ->
 /// a per-minute transcript at `output`, rewritten as it grows. Audio never touches disk. Publishes the state file
 /// (mode listen, this process's pid) for the notch while it runs. Used by the app and by the Listen CLI.
@@ -28,32 +47,57 @@ public final class Recorder: @unchecked Sendable {
     public enum Source: Sendable { case microphone, file(URL) }
 
     @MainActor private static var loading: Task<AsrModels, Error>?
-    @MainActor private static var listeners: [ProgressHandler] = []
+    @MainActor private static var listeners: [@MainActor (ModelProgress) -> Void] = []
+    /// The shared load's progress while it runs; nil when none is running (done, failed or cancelled).
+    @MainActor public private(set) static var modelProgress: ModelProgress?
 
     /// Parakeet Ultra: downloaded (~600 MB) and compiled on first use, then loaded from FluidAudio's cache. Callers
     /// share one load, so Settings' "Download now" and a recording never fetch it twice; a failed load can be retried.
-    @MainActor public static func models(progress: ProgressHandler? = nil) async throws -> AsrModels {
+    /// `progress` is called on the main actor, never goes backwards, and never after the load ended.
+    @MainActor public static func models(progress: (@MainActor (ModelProgress) -> Void)? = nil) async throws -> AsrModels {
         if let progress { listeners.append(progress) }
-        let task = loading ?? Task {
-            try await AsrModels.downloadAndLoad(version: .ultra) { p in
-                Task { @MainActor in Recorder.listeners.forEach { $0(p) } }
+        if loading == nil {
+            modelProgress = ModelProgress()
+            loading = Task {
+                try await AsrModels.downloadAndLoad(version: .ultra) { p in
+                    Task { @MainActor in
+                        guard var m = Recorder.modelProgress else { return }  // a late callback after the load ended
+                        m.add(p)
+                        Recorder.modelProgress = m
+                        Recorder.listeners.forEach { $0(m) }
+                    }
+                }
             }
         }
-        loading = task
+        let task = loading!
         do {
             let m = try await task.value
-            listeners.removeAll()
+            if loading == task { modelProgress = nil; listeners.removeAll() }
             return m
         } catch {
-            loading = nil
-            listeners.removeAll()
-            throw error
+            if loading == task { loading = nil; modelProgress = nil; listeners.removeAll() }  // not when cancelled: already reset
+            throw task.isCancelled ? CancellationError() : error  // one error type for a cancel, whatever FluidAudio threw
         }
+    }
+
+    /// Stops a running download; its callers get a CancellationError. FluidAudio keeps the bytes in `.partial` files
+    /// and resumes from them next time.
+    @MainActor public static func cancelModels() {
+        guard modelProgress != nil else { return }  // nothing running (a finished load stays cached in `loading`)
+        loading?.cancel()
+        loading = nil; modelProgress = nil; listeners.removeAll()
     }
 
     /// The model is already in FluidAudio's cache, so the next recording only loads it (seconds) instead of downloading.
     public static var modelsOnDisk: Bool {
         AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory(for: .ultra), version: .ultra)
+    }
+
+    /// Free bytes (for important use) on the volume the model downloads to.
+    public static var modelVolumeFree: Int64? {
+        var dir = AsrModels.defaultCacheDirectory(for: .ultra)
+        while !FileManager.default.fileExists(atPath: dir.path) && dir.path != "/" { dir.deleteLastPathComponent() }  // not there before the first download
+        return try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
     }
 
     public static var micDenied: Bool { [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .audio)) }

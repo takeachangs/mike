@@ -6,19 +6,23 @@ import SwiftUI
 
 /// The first-launch setup, one step at a time: microphone, speech model, dictation's Accessibility grant, the optional
 /// OpenAI key, and a real dictation into the window. Also opened from Settings' "Run setup again…". The window (and so
-/// this state) lives until Done, so closing it mid-setup and reopening resumes where it was.
+/// this state) lives until Done, so closing it mid-setup and reopening resumes where it was; the step is also kept in
+/// UserDefaults, so quitting mid-setup resumes there too.
 struct Setup: View {
     static let steps = ["Welcome", "Microphone", "Speech model", "Dictation", "Voice calls", "Try it", "Done"]
-    @State private var step = 0
+    static let session = URLSession(configuration: .ephemeral)
+    @AppStorage("setupStep") private var step = 0
     @State private var forward = true
     @State private var mic = AVCaptureDevice.authorizationStatus(for: .audio)
     @State private var download: Double? = Recorder.modelsOnDisk ? 1 : nil  // nil: not started; 1: ready
+    @State private var preparing = false  // downloaded, compiling for the Neural Engine
+    @State private var autoStarted = false
     @State private var downloadError: String?
     @State private var warmed = Dictation.warmed
     @AppStorage("dictation") private var dictation = true
     @State private var trusted = AXIsProcessTrusted()
     @State private var askedAX: Date?
-    @State private var stale = false  // still untrusted 10 s after opening the pane: likely a grant pinned to an older build
+    @State private var stale = false  // still untrusted 30 s after asking: likely a grant pinned to an older build
     @State private var hasKey = false
     @State private var replacing = false
     @State private var key = ""
@@ -34,7 +38,24 @@ struct Setup: View {
     let envKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?.isEmpty == false
 
     var canTry: Bool { mic == .authorized && dictation && trusted }
-    var blocked: Bool { (step == 1 && mic != .authorized) || (step == 3 && dictation && !trusted) || checking }
+    // A refused microphone doesn't block: Continue becomes "Continue without microphone".
+    var blocked: Bool { (step == 1 && mic == .notDetermined) || (step == 3 && dictation && !trusted) || checking }
+    /// Permissions given to a copy run from Downloads, a disk image or a translocated (quarantined) copy don't stick
+    /// once it is moved. Dev builds (no bundle) never warn.
+    // ponytail: a warning only, no auto-move; for a translocated copy, Show in Finder opens the hidden translocation folder
+    var misplaced: Bool {
+        let path = Bundle.main.bundlePath
+        return Bundle.main.bundleIdentifier != nil && (!path.hasPrefix("/Applications/") || path.contains("/AppTranslocation/") || path.hasPrefix("/Volumes/"))
+    }
+    var primary: String {
+        switch step {
+        case 0: "Get started"
+        case 1 where [.denied, .restricted].contains(mic): "Continue without microphone"
+        case 4 where !key.isEmpty: checking ? "Checking…" : "Save and continue"
+        case 6: "Done"
+        default: "Continue"
+        }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -47,9 +68,11 @@ struct Setup: View {
                     // Numbered like the headers: Welcome and Done aren't steps
                     .accessibilityLabel(Self.steps[i] + (i == 0 || i == 6 ? "" : ", step \(i) of 5") + (i < step ? ", completed" : i == step ? ", current" : ""))
                     .accessibilityAddTraits(i < step ? .isButton : [])
+                    .accessibilityAction { if i < step && !checking { jump(to: i) } }  // .ignore drops the button's own action
                 }
                 Spacer()
             }
+            .disabled(checking)
             .padding(16).padding(.top, 8)
             .frame(width: 210)
             .background(.background.secondary)
@@ -64,10 +87,10 @@ struct Setup: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 Divider().padding(.bottom, 16)
                 HStack {
-                    if step > 0 && step < 6 { Button("Back") { jump(to: step - 1) }.keyboardShortcut("[", modifiers: .command) }
+                    if step > 0 && step < 6 { Button("Back") { jump(to: step - 1) }.keyboardShortcut("[", modifiers: .command).disabled(checking) }
                     Spacer()
-                    if step == 4 || (step == 5 && tried.isEmpty) { Button(step == 4 ? "Skip" : "Skip test") { jump(to: step + 1) }.buttonStyle(.borderless) }
-                    Button(step == 0 ? "Get started" : step == 6 ? "Done" : step == 4 && !key.isEmpty ? (checking ? "Checking…" : "Save and continue") : "Continue") { next() }
+                    if step == 4 || (step == 5 && tried.isEmpty) { Button(step == 4 ? "Skip" : "Skip test") { jump(to: step + 1) }.buttonStyle(.borderless).disabled(checking) }
+                    Button(primary) { next() }
                         .keyboardShortcut(.defaultAction).disabled(blocked)
                 }
                 .controlSize(.large)
@@ -75,6 +98,10 @@ struct Setup: View {
             .padding(.horizontal, 48).padding(.top, 32).padding(.bottom, 24)
         }
         .frame(width: 760, height: 540)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { n in
+            // Closing the window on the Done step counts as Done. Done itself drops the window first, so this can't run twice.
+            if step == 6, let w = n.object as? NSWindow, w === Windows.setupWindow { finish(close: false) }
+        }
         .task(id: download == 1) {  // load the model once it's on disk, so Try it doesn't wait out the first load
             guard download == 1, !warmed else { return }
             do { try await Dictation.warm(); warmed = true } catch {
@@ -97,7 +124,7 @@ struct Setup: View {
             .frame(width: 20, height: 20)
             Text(Self.steps[i]).fontWeight(i == step ? .semibold : .regular).foregroundStyle(i == step ? .primary : .secondary)
             Spacer()
-            if i == 2 && step != 2, let d = download, d < 1 { ProgressView(value: d).progressViewStyle(.circular).controlSize(.mini) }
+            if i == 2 && step != 2, let d = download, d < 1 { ProgressView(value: preparing ? nil : d).progressViewStyle(.circular).controlSize(.mini) }
         }
         .padding(.vertical, 7).padding(.horizontal, 10)
         .background(i == step ? AnyShapeStyle(.background) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 7))
@@ -111,13 +138,20 @@ struct Setup: View {
 
     func next() {
         switch step {
-        case 4 where !key.isEmpty: Task { await saveKey(check: true) }
-        case 6:
-            if Bundle.main.bundleIdentifier != nil && loginItem != (SMAppService.mainApp.status == .enabled) { setLoginItem(loginItem) }
-            UserDefaults.standard.set(true, forKey: "onboarded")
-            Windows.finishSetup()
+        case 4 where !key.isEmpty:
+            checking = true  // now, not inside the Task, so a second press can't start a second check
+            Task { await saveKey(check: true) }
+        case 6: finish()
         default: jump(to: step + 1)
         }
+    }
+
+    /// Done, or the window closed on the Done step (`close` false: it is already closing).
+    func finish(close: Bool = true) {
+        if Bundle.main.bundleIdentifier != nil && loginItem != (SMAppService.mainApp.status == .enabled) { setLoginItem(loginItem) }
+        UserDefaults.standard.set(true, forKey: "onboarded")
+        Windows.finishSetup(close: close)
+        UserDefaults.standard.removeObject(forKey: "setupStep")  // after the window is gone, so it never shows Welcome again
     }
 
     @ViewBuilder var content: some View {
@@ -132,18 +166,28 @@ struct Setup: View {
                 .frame(width: 220, height: 44)
                 .background(UnevenRoundedRectangle(bottomLeadingRadius: 16, bottomTrailingRadius: 16).fill(.black))
                 .accessibilityHidden(true)
-                heading("Mike lives in your notch.", size: 26).padding(.top, 8)
+                heading(geo.hasCutout ? "Mike lives in your notch." : "Mike lives at the top of your screen.", size: 26).padding(.top, 8)
                 prose("Dictate anywhere with the right ⌘ key, record lectures with on-device transcripts, and make voice calls. A few permissions first. It takes about a minute.")
+                if misplaced {
+                    row {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).accessibilityHidden(true)
+                        Text("Move Mike to your Applications folder first, then open it from there, so permissions stick.").fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
+                    }
+                    .padding(.top, 8)
+                }
             case 1:
                 header(1, "Microphone")
                 prose("Mike hears you only while you dictate, record or call. Audio is never saved or uploaded for dictation and recordings.")
-                row(footer: [.denied, .restricted].contains(mic) ? "In Privacy & Security › Microphone, turn on Mike. This window notices on its own." : nil) {
+                row(footer: mic == .restricted ? "Your Mac's administrator controls microphone access."
+                    : mic == .denied ? "In Privacy & Security › Microphone, turn on Mike. This window notices on its own." : nil) {
                     Text("Microphone access").fontWeight(.medium)
                     Spacer()
                     pill(mic == .authorized ? "Allowed" : mic == .notDetermined ? "Not yet" : "Not allowed", ok: mic == .authorized)
                     if mic == .notDetermined {
                         Button("Allow…") { Task { _ = await Notch.microphoneAllowed(); mic = AVCaptureDevice.authorizationStatus(for: .audio) } }
-                    } else if mic != .authorized {
+                    } else if mic == .denied {
                         Button("Open System Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }
                     }
                 }
@@ -157,8 +201,9 @@ struct Setup: View {
                             Spacer()
                             Text(modelStatus).foregroundStyle(.secondary).monospacedDigit()
                             if download == nil { Button(downloadError == nil ? "Download" : "Try again") { fetchModel() } }
+                            else if download! < 1 && !preparing { Button("Cancel") { Recorder.cancelModels(); download = nil } }
                         }
-                        ProgressView(value: download ?? 0).tint(download ?? 0 >= 1 ? .green : nil)
+                        ProgressView(value: preparing ? nil : download ?? 0).tint(download ?? 0 >= 1 ? .green : nil)
                     }
                 }
             case 3:
@@ -170,7 +215,8 @@ struct Setup: View {
                     Text("Accessibility").fontWeight(.medium)
                     Spacer()
                     pill(trusted ? "Allowed" : askedAX != nil ? "Waiting…" : "Not yet", ok: trusted, waiting: askedAX != nil)
-                    if !trusted { Button("Open System Settings") { openAccessibility() } }  // kept while waiting: the pane may have been closed
+                    // kept while waiting: the pane may have been closed
+                    if !trusted { Button(askedAX == nil ? "Allow…" : "Open System Settings") { openAccessibility() } }
                 }
                 Toggle("Use dictation (you can change this later in Settings)", isOn: $dictation).foregroundStyle(.secondary)
             case 4:
@@ -186,6 +232,7 @@ struct Setup: View {
                 } else {
                     Text("OpenAI API key").fontWeight(.medium)
                     SecureField("OpenAI API key", text: $key, prompt: Text("sk-…")).labelsHidden().textFieldStyle(.roundedBorder).frame(maxWidth: 360)
+                        .disabled(checking)
                         .onChange(of: key) { keyError = nil; unreachable = false }
                         .onSubmit { if !key.isEmpty && !checking { next() } }
                     if let keyError {
@@ -204,14 +251,14 @@ struct Setup: View {
                     prose(mic != .authorized ? "Mike can't hear you yet: the microphone isn't allowed." : !dictation ? "Dictation is turned off, so there's nothing to try."
                           : "Dictation can't type until Mike has Accessibility.")
                     Button("Go to \(Self.steps[fix])") { jump(to: fix) }
+                } else if download != 1 {
+                    prose("The speech model isn't downloaded yet. Download it first, or skip the test.")
+                    Button("Go to Speech model") { jump(to: 2) }
                 } else {
                     if warmed {
-                        prose("Hold right ⌘ and say something. The m in your notch opens into a circle when it's listening.")
-                    } else if download == 1 {
-                        HStack(spacing: 8) { ProgressView().controlSize(.small); prose("Preparing the speech model…") }
+                        prose("Hold right ⌘ and say something. The m \(geo.hasCutout ? "in your notch" : "at the top of your screen") opens into a circle when it's listening.")
                     } else {
-                        prose("The speech model isn't downloaded yet. Download it first, or skip the test.")
-                        Button("Go to Speech model") { jump(to: 2) }
+                        HStack(spacing: 8) { ProgressView().controlSize(.small); prose("Preparing the speech model…") }
                     }
                     // A real dictation: the paste's ⌘V lands here through the hidden Edit menu (main.swift). A field's own
                     // prompt rather than an overlay on a TextEditor, so the placeholder starts exactly where the text does.
@@ -220,6 +267,7 @@ struct Setup: View {
                         .focused($fieldFocused)
                         .padding(12)
                         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(fieldFocused ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator)))
+                        .onChange(of: tried.isEmpty) { if !tried.isEmpty { AccessibilityNotification.Announcement("It works.").post() } }
                     if !tried.isEmpty {
                         Label { Text("It works.").fontWeight(.medium) } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
                     } else if nothingCame {
@@ -229,10 +277,11 @@ struct Setup: View {
                 }
             default:
                 heading("You're set.", size: 26).padding(.top, 8)
-                prose("Click the notch any time for Call, Listen, Library and Settings. Hold right ⌘ anywhere to dictate.")
+                prose("Click \(geo.hasCutout ? "the notch" : "Mike at the top of your screen") any time for Call, Listen, Library and Settings."
+                      + (dictation && trusted ? " Hold right ⌘ anywhere to dictate." : ""))
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                     summary("Microphone", mic == .authorized ? "Allowed" : "Not allowed", ok: mic == .authorized, fix: mic == .authorized ? nil : 1)
-                    summary("Speech model", download == 1 ? "Ready" : download != nil ? "Downloading… \(Int(download! * 100))%" : "Not downloaded",
+                    summary("Speech model", download == 1 ? "Ready" : download != nil ? modelStatus : "Not downloaded",
                             ok: download == 1, waiting: download != nil, fix: download == nil ? 2 : nil)
                     summary("Dictation", !dictation ? "Off" : trusted ? "On" : "Needs Accessibility", ok: dictation && trusted, fix: dictation && !trusted ? 3 : nil)
                     summary("Voice calls", hasKey || envKey ? "Set up" : "Skipped", ok: hasKey || envKey, fix: hasKey || envKey ? nil : 4)
@@ -243,24 +292,30 @@ struct Setup: View {
         }
         .task(id: step) {
             headingFocused = true  // VoiceOver lands on the new step's heading
-            if step == 4 { hasKey = Keychain.hasOpenAIKey }  // existence only: reading the key may ask for the login password
+            // existence only: reading the key may ask for the login password. Also at Done, which a resumed setup can open on.
+            if step == 4 || step == 6 { hasKey = Keychain.hasOpenAIKey }
             if step == 5 { fieldFocused = true }
-            // Neither grant has a change notification: poll while a step that needs them shows. Try it also watches the
-            // dictation end, to say so when nothing arrived.
+            // Joins a download already running elsewhere, so it shows here; and makes "continue while it downloads" true.
+            if step == 2 && !autoStarted && download == nil && downloadError == nil { autoStarted = true; fetchModel() }
+            // Neither grant has a change notification: poll while a step that needs them shows. Try it also counts
+            // dictations that finished with no words, to say so (an Esc cancel isn't one).
             guard [1, 3, 5, 6].contains(step) else { return }
-            var busy = false
+            var empties = model.emptyDictations
             while !Task.isCancelled {
                 let m = AVCaptureDevice.authorizationStatus(for: .audio), t = AXIsProcessTrusted()
                 if t && !trusted { model.installDictationTap() }  // now, rather than on main.swift's next 2 s tick
-                if (step == 1 && m == .authorized && mic != .authorized) || (step == 3 && t && !trusted) { Windows.setup() }  // back from System Settings
-                mic = m; trusted = t
-                stale = askedAX.map { Date().timeIntervalSince($0) > 10 } ?? false
-                let now = model.dictation != nil || model.transcribing
-                if step == 5 && busy && !now {
-                    try? await Task.sleep(for: .seconds(0.7))  // the paste lands after the transcript
-                    nothingCame = tried.isEmpty
+                if step == 1 && m == .authorized && mic != .authorized {  // back from System Settings
+                    Windows.setup()
+                    AccessibilityNotification.Announcement("Microphone allowed.").post()
                 }
-                busy = now
+                if step == 3 && t && !trusted {
+                    Windows.setup()
+                    AccessibilityNotification.Announcement("Accessibility allowed.").post()
+                }
+                mic = m; trusted = t
+                stale = askedAX.map { Date().timeIntervalSince($0) > 30 } ?? false
+                if step == 5 && model.emptyDictations != empties { nothingCame = tried.isEmpty }
+                empties = model.emptyDictations
                 try? await Task.sleep(for: .seconds(step == 5 ? 0.25 : 1))
             }
         }
@@ -268,8 +323,7 @@ struct Setup: View {
 
     var modelStatus: String {
         guard let d = download else { return "600 MB" }
-        // ponytail: FluidAudio reports a fraction only, so the megabytes are of the nominal 600 MB
-        return d >= 1 ? "Ready" : "\(Int(d * 100))% · about \(Int((1 - d) * 600)) MB left"
+        return d >= 1 ? "Ready" : preparing ? "Preparing…" : "Downloading… \(Int(d * 100))%"
     }
 
     func heading(_ text: String, size: CGFloat) -> some View {
@@ -312,14 +366,23 @@ struct Setup: View {
     }
 
     /// The same shared load as Settings' "Download now": it runs on in Recorder after this step (or window) is gone.
+    /// Joins one already running (Settings, a recording, dictation) rather than starting a second.
     func fetchModel() {
-        download = 0; downloadError = nil
+        downloadError = nil
+        if Recorder.modelProgress == nil, let free = Recorder.modelVolumeFree, free < 1_200_000_000 {  // the download plus its compiled copy
+            downloadError = "Needs about 1.2 GB free on this Mac."
+            return
+        }
+        let now = Recorder.modelProgress ?? ModelProgress()
+        download = min(now.fraction, 0.99); preparing = now.preparing  // 1 means loaded, only after models() returns
         Task { @MainActor in
             do {
-                _ = try await Recorder.models { p in Task { @MainActor in download = min(p.fractionCompleted, 0.99) } }
-                download = 1
+                _ = try await Recorder.models { p in download = min(p.fraction, 0.99); preparing = p.preparing }
+                download = 1; preparing = false
+                AccessibilityNotification.Announcement("The speech model is ready.").post()
             } catch {
-                download = nil
+                download = nil; preparing = false
+                if error is CancellationError { return }  // Cancel: back to Download, no error
                 downloadError = offline(error) ? "You seem to be offline. Connect to the internet and try again." : "The download stopped: \(error.localizedDescription)"
             }
         }
@@ -335,29 +398,35 @@ struct Setup: View {
     }
 
     /// Checks the key with one free request (listing models) before saving it, unless the user chose to save anyway.
+    /// Only a 200 counts as valid; anything else that isn't a clear refusal offers Save anyway.
     func saveKey(check: Bool) async {
+        let key = self.key.trimmingCharacters(in: .whitespacesAndNewlines)  // the key as it was pressed, whatever the field does next
         keyError = nil; unreachable = false
         if check {
             checking = true
             defer { checking = false }
             var req = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!, timeoutInterval: 10)
-            req.setValue("Bearer \(key.trimmingCharacters(in: .whitespacesAndNewlines))", forHTTPHeaderField: "Authorization")
-            do {
-                let (_, response) = try await URLSession(configuration: .ephemeral).data(for: req)
-                if (response as? HTTPURLResponse)?.statusCode == 401 { keyError = "OpenAI didn't accept this key."; return }
-            } catch {
-                keyError = "Couldn't reach OpenAI to check the key."; unreachable = true
-                return
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            let status = (try? await Self.session.data(for: req)).flatMap { ($0.1 as? HTTPURLResponse)?.statusCode }
+            switch status {
+            case 200: break
+            case 401: keyError = "OpenAI didn't accept this key."; return
+            case 403: keyError = "This key can't use OpenAI's models (region or project permissions)."; return
+            default: keyError = "Couldn't reach OpenAI to check the key."; unreachable = true; return
             }
         }
         guard Keychain.setOpenAIKey(key) else { keyError = "The Keychain didn't save the key."; return }
-        hasKey = true; replacing = false; key = ""
-        jump(to: 5)
+        hasKey = true; replacing = false; self.key = ""
+        if step == 4 { jump(to: 5) }
     }
 
+    /// The first press shows the system prompt only (it has its own Open System Settings button); later presses open the pane.
     func openAccessibility() {
+        if askedAX == nil {
+            _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
+        } else {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        }
         askedAX = Date(); stale = false
-        _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 }
