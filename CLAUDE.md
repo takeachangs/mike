@@ -28,7 +28,7 @@ skill/SKILL.md, skill/listen/SKILL.md  generic copies of the agent-side /call an
 .github/workflows/ci.yml             tests and an app build on pull requests and pushes to main; a v* tag (app/scripts/release.sh) publishes the zip and DMG as a release with commit-list notes
 ```
 
-Runtime state lives outside the repo in `~/.mike/`: `state.json`, `app.pid`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), `listen-<stamp>.txt` per recording (paragraphs starting `HH:MM `) with the agent's `listen-<stamp>.md` notes beside it, and for agent mode `prompt.txt` (personal voice prompt), `context.txt`, `inbox.jsonl`, `outbox.jsonl` and `board/`. Settings (sound volume, onboarded, and `setupStep`, the setup step to resume at, cleared when setup finishes) are in the app's UserDefaults; the OpenAI key is in the login Keychain (`com.takeachangs.mike`).
+Runtime state lives outside the repo in `~/.mike/`: `state.json`, `app.pid`, `transcript-<stamp>.json` per call (`{"seconds", "transcript"}`), `listen-<stamp>.txt` per recording (paragraphs starting `HH:MM `) with the agent's `listen-<stamp>.md` notes beside it, and for agent mode `prompt.txt` (personal voice prompt), `context.txt`, `inbox.jsonl`, `outbox.jsonl` and `board/`. Settings (sound volume, onboarded, and `setupStep`, the setup step to resume at, reset when setup is opened again after finishing) are in the app's UserDefaults; the OpenAI key is in the login Keychain (`com.takeachangs.mike`).
 
 # Commands
 

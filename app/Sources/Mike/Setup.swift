@@ -150,8 +150,7 @@ struct Setup: View {
     func finish(close: Bool = true) {
         if Bundle.main.bundleIdentifier != nil && loginItem != (SMAppService.mainApp.status == .enabled) { setLoginItem(loginItem) }
         UserDefaults.standard.set(true, forKey: "onboarded")
-        Windows.finishSetup(close: close)
-        UserDefaults.standard.removeObject(forKey: "setupStep")  // after the window is gone, so it never shows Welcome again
+        Windows.finishSetup(close: close)  // setupStep stays until the next Windows.setup(), so the closing window keeps Done
     }
 
     @ViewBuilder var content: some View {
@@ -270,7 +269,7 @@ struct Setup: View {
                         .onChange(of: tried.isEmpty) { if !tried.isEmpty { AccessibilityNotification.Announcement("It works.").post() } }
                     if !tried.isEmpty {
                         Label { Text("It works.").fontWeight(.medium) } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                    } else if nothingCame {
+                    } else if nothingCame && warmed {
                         Text("Nothing came through? Make sure the box is focused (click in it), then hold right ⌘ while you speak and let go when you're done.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
@@ -314,7 +313,7 @@ struct Setup: View {
                 }
                 mic = m; trusted = t
                 stale = askedAX.map { Date().timeIntervalSince($0) > 30 } ?? false
-                if step == 5 && model.emptyDictations != empties { nothingCame = tried.isEmpty }
+                if step == 5 && warmed && model.emptyDictations != empties { nothingCame = tried.isEmpty }  // not while Preparing…
                 empties = model.emptyDictations
                 try? await Task.sleep(for: .seconds(step == 5 ? 0.25 : 1))
             }
