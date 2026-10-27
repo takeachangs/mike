@@ -14,6 +14,13 @@ Click the notch to:
 - **Library**: every past call and recording as a card. Search, read,
   copy, export, or move to the Trash.
 
+Anywhere, **dictate** with the right ⌘ key: hold it and speak, or tap it
+to start and tap again to stop (Esc cancels). The words are transcribed on
+this Mac with the same model and pasted where your cursor is. The M's dots turn
+while it gets ready, open into a circle with a soft cue when you can speak,
+and a soft glow around the notch breathes with your voice. Needs Accessibility access; Settings
+can turn it off.
+
 While Mike runs, a small black tab sits to the left of the notch holding
 seven white dots, the M from the icon. Click it (or the notch) for the
 actions. During a session the dots morph through a circle while it loads
@@ -55,8 +62,8 @@ Settings has the same controls plus sound volume and "Open at login".
 
 ```
 app/                    the Swift package (see app/Package.swift)
-  Sources/MikeKit  the library: recorder, Live call, state file, sessions, transcript, cues, Keychain
-  Sources/Mike     the app: notch panel, Library, Settings
+  Sources/MikeKit  the library: recorder, dictation, Live call, state file, sessions, transcript, cues, Keychain
+  Sources/Mike     the app: notch panel, dictation key and paste, Library, Settings
   Sources/Listen        the recorder as a command, for the /listen skill
   Tests/                swift-testing unit tests
   Resources/            Info.plist, entitlements, icon

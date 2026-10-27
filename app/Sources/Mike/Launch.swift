@@ -14,8 +14,8 @@ enum LaunchError: LocalizedError {
 
 /// Sessions the resident app runs itself: a plain GPT-Live call or a recording, both inside this process.
 extension Notch {
-    /// One session at a time, counting one still starting (model download, connecting) or still saving.
-    var busy: Bool { state != "off" || launching || stopping || recorder != nil || call != nil }
+    /// One session at a time, counting one still starting (model download, connecting) or still saving, and dictation.
+    var busy: Bool { state != "off" || launching || stopping || recorder != nil || call != nil || dictation != nil || transcribing }
 
     /// `testAudio` plays a file in real time instead of the microphone (the `--test-audio` launch argument).
     func launch(listen: Bool, testAudio: URL? = nil) {
