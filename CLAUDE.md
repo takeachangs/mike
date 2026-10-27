@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 # What this is
 
-Mike, a Mac app that lives in the MacBook notch. On its own it makes plain GPT-Live voice calls (`gpt-live-1`, user's own OpenAI key), records lectures with on-device transcription (Parakeet Ultra via FluidAudio), and keeps a Library of both. It is also the notch for a coding-agent workflow: `bridge.py` runs agent-mode calls (client delegation, answered by an agent session on a notes folder) and the `Listen` command records for the `/listen` skill. `README.md` is the human overview, `SETUP.md` is the agent-mode install procedure for a coding agent.
+Mike, a Mac app that lives in the MacBook notch. On its own it makes plain GPT-Live voice calls (`gpt-live-1`, user's own OpenAI key), records lectures with on-device transcription (Parakeet Ultra via FluidAudio), and keeps a Library of both. It is also the notch for a coding-agent workflow: `bridge.py` runs agent-mode calls (client delegation, answered by an agent session on a notes folder) and the `Listen` command records for the `/listen` skill. `README.md` is the human overview, `SETUP.md` is the agent-mode install procedure for a coding agent, `SPEC.md` is the design record (what the notch, the dots, the card and the icon are meant to be, decisions, progress, backlog).
 
 # Layout
 
@@ -67,6 +67,7 @@ Changing any of these means changing every side in the same commit.
 
 # Rules
 
+- **Every change goes through a branch and a pull request**, made by a subagent in its own worktree where possible. Never commit or push to `main` directly; the user merges and tags releases (`app/scripts/release.sh`). Still install the branch build locally (`app/scripts/install.sh --open`) so the user can try it before merging.
 - **Never start a real call unless asked**: `uv run bridge.py` and the app's Call open a billed session and the microphone. Test with `selftest`, the Swift tests, `drive.py`, or hand-written inbox lines.
 - **Never start a recording on the mic unless asked.** Test with `Listen --file`.
 - **The key stays out of files.** It lives in the Keychain or the environment. Never write it into the repo or anywhere else.
