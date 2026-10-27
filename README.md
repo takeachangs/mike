@@ -100,6 +100,10 @@ Point your coding agent at [SETUP.md](SETUP.md) and say "set this up". It
 checks the prerequisites, builds the app, tests the key, personalises
 a copy of `prompt.txt` in `~/.mike` and installs the skills into your notes folder.
 
+## Thanks
+
+Thanks to my dear friend Jack Baker for suggesting the name "Mike".
+
 ## License
 
 GPL-3.0. See LICENSE.
