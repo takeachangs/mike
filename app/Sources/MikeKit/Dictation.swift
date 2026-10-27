@@ -56,17 +56,29 @@ public struct DictationKey: Sendable {
 // engine has stopped, and a torn level only misdraws the aura. A new input device mid-dictation ends the capture there.
 public final class Dictation: @unchecked Sendable {
     @MainActor private static var asr: AsrManager?
+    @MainActor private static var loading: Task<AsrManager, Error>?
 
     /// Loads Parakeet Ultra once (downloading it the first time, shared with recordings) and keeps it loaded.
     @MainActor public static var warmed: Bool { asr != nil }
 
+    /// Callers share one load (the first one compiles the model, about half a minute), so a dictation finished while
+    /// the app or setup is still warming waits for that load instead of starting a second.
     @MainActor @discardableResult public static func warm() async throws -> AsrManager {
         if let asr { return asr }
-        let m = AsrManager()
-        try await m.loadModels(Recorder.models())
-        if let asr { return asr }  // another warm finished first
-        asr = m
-        return m
+        let task = loading ?? Task {
+            let m = AsrManager()
+            try await m.loadModels(Recorder.models())
+            return m
+        }
+        loading = task
+        do {
+            let m = try await task.value
+            asr = m
+            return m
+        } catch {
+            loading = nil
+            throw error
+        }
     }
 
     /// The mic's loudness, 0...1, on the recorder's scale.

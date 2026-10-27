@@ -5,27 +5,38 @@ import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The app's two ordinary windows. The app is an accessory (no Dock icon), so opening one also activates the app.
+/// The app's ordinary windows. The app is an accessory (no Dock icon), so opening one also activates the app.
 @MainActor enum Windows {
     private static var open: [String: NSWindow] = [:]
 
     static func library() { show("library", "Library", CGSize(width: 900, height: 600), Library()) }
-    static func settings(welcome: Bool = false) {
-        if welcome { show("welcome", "Welcome to Mike", CGSize(width: 520, height: 500), SettingsView(welcome: true)) }
-        else { show("settings", "Settings", CGSize(width: 520, height: 440), SettingsView(welcome: false)) }
+    static func settings() { show("settings", "Settings", CGSize(width: 520, height: 440), SettingsView()) }
+    /// Kept (with its step) when closed mid-setup, so reopening resumes; only Done drops it.
+    static func setup() { show("setup", "Welcome to Mike", CGSize(width: 760, height: 540), Setup(), resizable: false) }
+    static func finishSetup() {
+        open["setup"]?.close()
+        open["setup"] = nil
     }
 
-    private static func show(_ id: String, _ title: String, _ size: CGSize, _ view: some View) {
+    private static func show(_ id: String, _ title: String, _ size: CGSize, _ view: some View, resizable: Bool = true) {
         let w = open[id] ?? {
-            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: NSWindow.StyleMask([.titled, .closable, .miniaturizable]).union(resizable ? .resizable : []),
                              backing: .buffered, defer: false)
             w.isReleasedWhenClosed = false
             w.contentView = NSHostingView(rootView: view)
             w.center()
             open[id] = w
+            // The last window closing hides the Dock icon again (the notch panel is not one of these).
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak w] _ in
+                MainActor.assumeIsolated {
+                    if !open.values.contains(where: { $0 !== w && $0.isVisible }) { NSApp.setActivationPolicy(.accessory) }
+                }
+            }
             return w
         }()
         w.title = title
+        // A Dock icon and a ⌘-Tab entry while a window is up, so it can be found again after System Settings.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()  // macOS 14 dropped activate(ignoringOtherApps:): the old call left the window behind
         w.makeKeyAndOrderFront(nil)
         w.orderFrontRegardless()
@@ -154,11 +165,11 @@ struct Detail: View {
 
 // ------------------------------------------------------------------------------------------------ settings
 
-/// Settings, also shown on first launch as the welcome screen: what the app needs and why.
+/// Settings: what the app needs and why. First launch shows Setup instead.
 struct SettingsView: View {
-    let welcome: Bool
-    @State private var key = Keychain.stored ?? ""
-    @State private var keySaved = Keychain.stored != nil
+    @State private var key = ""
+    @State private var keySaved = Keychain.hasOpenAIKey
+    @State private var replacing = false
     @AppStorage("soundVolume") private var volume = 0.25
     @AppStorage("silenceHangUp") private var silence = 30.0
     @State private var loginItem = SMAppService.mainApp.status == .enabled
@@ -169,11 +180,6 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if welcome {
-                Text("Mike lives in your MacBook's notch. Click the notch to start a voice call or record a lecture; past sessions are in the Library.")
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding([.horizontal, .top], 20)
-            }
             TabView {
                 Form {
                     Section("Microphone") {
@@ -203,9 +209,10 @@ struct SettingsView: View {
                             }
                         }
                         Toggle("Open at login", isOn: $loginItem)
-                            .onChange(of: loginItem) { setLoginItem(loginItem) }
+                            .onChange(of: loginItem) { if !setLoginItem(loginItem) { loginItem = SMAppService.mainApp.status == .enabled } }
                             .disabled(Bundle.main.bundleIdentifier == nil)
                         LabeledContent("Data folder") { Button("Show in Finder") { NSWorkspace.shared.open(Paths.stateDir) } }
+                        LabeledContent("Setup") { Button("Run setup again…") { Windows.setup() } }
                         LabeledContent("Version") { Text(appVersion).foregroundStyle(.secondary) }
                     }
                 }
@@ -227,13 +234,24 @@ struct SettingsView: View {
                 // Everything a future paywall gates lives in this tab (see the paywall issue), so gating it is a single `if`.
                 Form {
                     Section {
-                        SecureField("OpenAI API key", text: $key, prompt: Text("sk-…"))
-                            .onChange(of: key) { keySaved = false }
-                        HStack {
-                            Button(keySaved ? "Saved" : "Save key") { keySaved = Keychain.setOpenAIKey(key) }.disabled(keySaved)
-                            if ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?.isEmpty == false {
-                                Text("OPENAI_API_KEY from the environment is used first.").font(.caption).foregroundStyle(.secondary)
+                        // The saved key is never read back here: reading it can ask for the login password (Keychain.hasOpenAIKey).
+                        if keySaved && !replacing {
+                            LabeledContent("OpenAI API key") {
+                                HStack {
+                                    Text("A key is saved").foregroundStyle(.secondary)
+                                    Button("Replace") { replacing = true }
+                                    Button("Remove", role: .destructive) { if Keychain.setOpenAIKey("") { keySaved = false } }
+                                }
                             }
+                        } else {
+                            SecureField("OpenAI API key", text: $key, prompt: Text("sk-…"))
+                            HStack {
+                                Button("Save key") { if Keychain.setOpenAIKey(key) { keySaved = true; replacing = false; key = "" } }.disabled(key.isEmpty)
+                                if replacing { Button("Cancel") { replacing = false; key = "" } }
+                            }
+                        }
+                        if ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?.isEmpty == false {
+                            Text("OPENAI_API_KEY from the environment is used first.").font(.caption).foregroundStyle(.secondary)
                         }
                         Picker("Hang up after silence", selection: $silence) {
                             Text("Never").tag(0.0); Text("15 seconds").tag(15.0); Text("30 seconds").tag(30.0)
@@ -245,14 +263,6 @@ struct SettingsView: View {
                 }
                 .formStyle(.grouped)
                 .tabItem { Label("Call", systemImage: "phone") }
-            }
-            if welcome {
-                Button("Done") {
-                    UserDefaults.standard.set(true, forKey: "onboarded")
-                    NSApp.keyWindow?.close()
-                }
-                .keyboardShortcut(.defaultAction)
-                .padding(.bottom, 16)
             }
         }
         .onAppear { mic = AVCaptureDevice.authorizationStatus(for: .audio); trusted = AXIsProcessTrusted() }
@@ -272,12 +282,15 @@ struct SettingsView: View {
         }
     }
 
-    func setLoginItem(_ on: Bool) {
-        do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() } catch {
-            loginItem = SMAppService.mainApp.status == .enabled
-            NSAlert(error: error).runModal()
-        }
+}
+
+/// Turns opening at login on or off (Settings and Setup's Done); false, after showing why, when that failed.
+@MainActor @discardableResult func setLoginItem(_ on: Bool) -> Bool {
+    do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() } catch {
+        NSAlert(error: error).runModal()
+        return false
     }
+    return true
 }
 
 let appVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"

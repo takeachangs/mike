@@ -53,10 +53,11 @@ cd app && scripts/build-app.sh          # builds and signs dist/Mike.app (ad-hoc
 scripts/install.sh --open               # quits a running copy, replaces /Applications/Mike.app, opens it
 ```
 
-The first launch shows a short setup window: allow the microphone,
-optionally download the speech model up front (about 600 MB, once), and
-paste an OpenAI API key if you want calls (it is stored in your Keychain).
-Settings has the same controls plus sound volume and "Open at login".
+The first launch walks you through setup: allow the microphone, download
+the speech model (about 600 MB, once), allow Accessibility for dictation,
+paste an OpenAI API key if you want calls (it is stored in your Keychain),
+and try a dictation. Settings has the same controls plus sound volume,
+"Open at login" and "Run setup again…".
 
 ## Layout
 
