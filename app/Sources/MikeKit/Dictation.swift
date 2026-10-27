@@ -58,6 +58,8 @@ public final class Dictation: @unchecked Sendable {
     @MainActor private static var asr: AsrManager?
 
     /// Loads Parakeet Ultra once (downloading it the first time, shared with recordings) and keeps it loaded.
+    @MainActor public static var warmed: Bool { asr != nil }
+
     @MainActor @discardableResult public static func warm() async throws -> AsrManager {
         if let asr { return asr }
         let m = AsrManager()
@@ -69,7 +71,7 @@ public final class Dictation: @unchecked Sendable {
 
     /// The mic's loudness, 0...1, on the recorder's scale.
     public private(set) var level = 0.0
-    private var samples: [Float] = [], rate = 0.0
+    private var samples: [Float] = [], rate = 0.0, cue: Range<Int>?
     private let engine = AVAudioEngine()
 
     public init() {}
@@ -82,6 +84,9 @@ public final class Dictation: @unchecked Sendable {
         try engine.start()
     }
 
+    /// Leaves the next `seconds` of audio out of the transcript: a cue sound playing into the microphone.
+    public func skip(_ seconds: Double) { cue = samples.count..<samples.count + Int(seconds * rate) }
+
     /// Stops the microphone; the audio is dropped.
     public func cancel() {
         engine.inputNode.removeTap(onBus: 0)
@@ -91,6 +96,7 @@ public final class Dictation: @unchecked Sendable {
     /// Stops the microphone and returns what was said, trimmed; empty when nothing was.
     @MainActor public func finish() async throws -> String {
         cancel()
+        if let cue { samples.removeSubrange(cue.clamped(to: 0..<samples.count)) }
         guard !samples.isEmpty else { return "" }
         var audio = try AudioConverter().resample(samples, from: rate)
         if audio.count < 16_000 { audio += [Float](repeating: 0, count: 16_000 - audio.count) }  // the model wants at least 0.3 s

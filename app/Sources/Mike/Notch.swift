@@ -27,6 +27,7 @@ import SwiftUI
     var orb = Spring(1, response: 0.1)  // the dots' hover grow and press shrink
     // Dictation (Dictate.swift): the key tap and its rules, the capture, and the aura they light around the notch.
     var tap: CFMachPort?, keys = DictationKey(), dictation: Dictation?, transcribing = false, dictatedAt = Date.distantPast
+    var dictationReady = false, tapNoted = false  // ready: mic live and model loaded, the circle and the start cue
     var aura = Spring(0, response: 0.4), spread = Spring(1, response: 0.4), sheen = Spring(0, response: 0.3), voice = 0.0
     var auraOut = 0.6  // how the aura leaves: slow and spreading after an insert, quick and drawn in after a cancel
     /// False when nothing is drawn or moving: the view's timeline pauses, so an idle app costs no frames.
@@ -160,15 +161,17 @@ import SwiftUI
         // No cutout: the tab sits alone, centred, until a session or the card needs the notch; docks again only once the card is gone.
         dock.target = geo.hasCutout || !resident || state != "off" || open || shown > 0.002 ? 1 : 0
         dock.response = reduce ? 0.15 : 0.3
-        morph.target = (thinking || state == "speaking") && !muted && !reduce ? 1 : 0  // the dots cycle while waiting or speaking
+        // Dictation: the dots cycle while it gets ready and while it transcribes, and open into the circle once you can speak.
+        let heard = dictation != nil && Date().timeIntervalSince(dictatedAt) > 0.12, busy = heard || transcribing
+        let dictWaiting = (heard && !dictationReady) || transcribing
+        morph.target = (thinking || state == "speaking" || dictWaiting) && !muted && !reduce ? 1 : 0  // the dots cycle while waiting or speaking
         depth.target = cardDepth
-        round.target = (open || (state == "listening" && !muted && !recorderMode)) && !reduce ? 1 : 0  // the circle: card open, or a call listening
+        round.target = (open || (state == "listening" && !muted && !recorderMode) || dictationReady) && !reduce ? 1 : 0  // the circle: card open, a call listening, or dictation ready
         cx.target = open ? 1 : 0; cy.target = cx.target; fade.target = cx.target
         cx.response = open ? 0.26 : 0.34; cy.response = open ? 0.30 : 0.26  // see cx/cy; retargeting keeps velocity
         orb.target = reduce ? 1 : pressed ? 0.9 : overTab ? 1.1 : 1
         // The aura waits out the first 120 ms, so right ⌘ in a shortcut (⌘C) never lights it. Transcribing it settles
         // lower with a sheen; then it leaves the way auraOut says. Reduce Motion: it only fades.
-        let heard = dictation != nil && Date().timeIntervalSince(dictatedAt) > 0.12, busy = heard || transcribing
         aura.target = heard ? 1 : transcribing ? 0.6 : 0
         aura.response = busy ? 0.4 : reduce ? 0.2 : auraOut
         spread.target = busy || reduce ? 1 : auraOut < 0.3 ? 0.6 : 1.6
@@ -232,14 +235,16 @@ import SwiftUI
         let cycle = Notch.pose(speaking ? Notch.unfolding : Notch.morphing, at: (t / 4.8).truncatingRemainder(dividingBy: 1))
         let hearing = state == "listening" && !muted, call = hearing && !recorderMode, recording = hearing && recorderMode
         // On a call the circle breathes: a slow 3 s swell at rest, and it grows and brightens with your voice.
-        let breathe = call && !reduce ? 1 + 0.2 * level + 0.04 * (1 - cos(2 * .pi * t / 3)) / 2 : 1
+        // Dictating once ready, it breathes the same way with the dictation's mic.
+        let breathe = (call || dictationReady) && !reduce ? 1 + 0.2 * (call ? level : voice) + 0.04 * (1 - cos(2 * .pi * t / 3)) / 2 : 1
+        let dictWaiting = (dictation != nil && Date().timeIntervalSince(dictatedAt) > 0.12 && !dictationReady) || transcribing  // Reduce Motion: dim instead of the cycle
         for i in 0..<7 {
             let rm = Notch.mShape[i], rc = Notch.circle(0)[i], c = cycle[i]
             let r = (rm.0 + (rc.0 * breathe - rm.0) * o, rm.1 + (rc.1 * breathe - rm.1) * o)  // at rest: the m, or the circle
             let x = r.0 + (c.0 - r.0) * m, y = r.1 + (c.1 - r.1) * m
             // Recording: a soft glow walks the m from foot to foot every 2.8 s, and the dots swell with the level.
             let walk = recording && !reduce ? max(0, 1 - abs(((t / 2.8 * 7 - Double(i) + 3.5).truncatingRemainder(dividingBy: 7) + 7).truncatingRemainder(dividingBy: 7) - 3.5)) : 0
-            let a = muted ? (i == 3 ? 1 : 0.35) : hearing ? max(0.55 + 0.45 * walk, 0.6 + 0.4 * level) : 1
+            let a = muted ? (i == 3 ? 1 : 0.35) : hearing ? max(0.55 + 0.45 * walk, 0.6 + 0.4 * level) : dictWaiting && reduce ? 0.45 : 1
             let d = 3 * (hearing && !reduce ? 1 + 0.15 * walk + 0.3 * level : 1)
             dots.fill(Path(ellipseIn: CGRect(x: x - d / 2, y: y - d / 2, width: d, height: d)), with: .color(.white.opacity(a)))
         }

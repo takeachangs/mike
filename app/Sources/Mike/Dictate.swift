@@ -6,6 +6,9 @@ import MikeKit
 /// whatever has focus. A CGEventTap rather than NSEvent monitors, because Esc in click mode must not also reach the
 /// front app. Both the tap and the paste need Accessibility. Resident app only.
 extension Notch {
+    /// start.wav (0.67 s) plus afplay's start-up delay.
+    static let startCueLength = 0.85
+
     static var dictationOn: Bool { UserDefaults.standard.object(forKey: "dictation") as? Bool ?? true }
 
     /// Installs the key tap once Accessibility allows it. Called at launch and every few seconds after, so granting
@@ -13,6 +16,10 @@ extension Notch {
     func installDictationTap() {
         guard tap == nil, Self.dictationOn else { return }
         guard AXIsProcessTrusted() else {
+            if !tapNoted {  // persisted, so a lost grant (each ad-hoc rebuild) shows in `log show`
+                tapNoted = true
+                Log.app.error("dictation off: no Accessibility access (after an ad-hoc rebuild: tccutil reset Accessibility com.takeachangs.mike, then allow again)")
+            }
             if !UserDefaults.standard.bool(forKey: "askedAccessibility") {  // the system prompt once; Settings shows it after
                 UserDefaults.standard.set(true, forKey: "askedAccessibility")
                 _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
@@ -67,21 +74,33 @@ extension Notch {
                 say(error.localizedDescription)
                 return
             }
-            dictation = d; dictatedAt = Date()
+            dictation = d; dictatedAt = Date(); dictationReady = false
             panel?.setFrame(geo.expanded, display: true)  // room for the aura below the notch
             wake(true)
-            if Recorder.modelsOnDisk { Task { try? await Dictation.warm() } }  // loads while you speak; kept loaded after
+            // Ready once the model is loaded (kept loaded after) and past the aura's 120 ms: the dots open into the
+            // circle and the start cue says speak now. The cue itself is left out of the transcript.
+            guard Recorder.modelsOnDisk else { return }  // first use: the download happens at finish
+            Task {
+                _ = try? await Dictation.warm()
+                try? await Task.sleep(for: .seconds(max(0, 0.12 - Date().timeIntervalSince(dictatedAt))))
+                guard dictation === d, Dictation.warmed else { return }
+                dictationReady = true
+                d.skip(Notch.startCueLength)
+                Cue.start.play()
+            }
         case .cancel:
-            dictation?.cancel(); dictation = nil; auraOut = 0.15
+            if dictationReady { Cue.pause.play() }  // quieter than stop; a shortcut before ready stays silent
+            dictation?.cancel(); dictation = nil; dictationReady = false; auraOut = 0.15
         case .finish:
             guard let d = dictation else { return }
-            dictation = nil; transcribing = true
+            dictation = nil; dictationReady = false; transcribing = true
             if !Recorder.modelsOnDisk { say("Downloading the speech model (about 600 MB) for dictation…", for: 10) }
             Task { @MainActor in
                 do {
                     let text = try await d.finish()
                     auraOut = text.isEmpty ? 0.15 : 0.6
                     if !text.isEmpty { paste(text) }
+                    (text.isEmpty ? Cue.pause : Cue.stop).play()  // capture has ended, so it is never transcribed
                 } catch {
                     auraOut = 0.15
                     Log.app.error("dictation failed: \(error.localizedDescription, privacy: .public)")

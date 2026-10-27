@@ -16,8 +16,9 @@ Click the notch to:
 
 Anywhere, **dictate** with the right ⌘ key: hold it and speak, or tap it
 to start and tap again to stop (Esc cancels). The words are transcribed on
-this Mac with the same model and pasted where your cursor is; a soft glow
-around the notch shows it listening. Needs Accessibility access; Settings
+this Mac with the same model and pasted where your cursor is. The M's dots turn
+while it gets ready, open into a circle with a soft cue when you can speak,
+and a soft glow around the notch breathes with your voice. Needs Accessibility access; Settings
 can turn it off.
 
 While Mike runs, a small black tab sits to the left of the notch holding
