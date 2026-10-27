@@ -28,15 +28,17 @@ public enum Keychain {
         return SecItemCopyMatching(q as CFDictionary, nil) == errSecSuccess
     }
 
-    /// Saves the key (updating the saved one in place, so a refused save never loses it), or removes it when empty.
-    /// Returns false when the Keychain refused.
+    /// Saves the key (updating the saved one in place where it can, so a refused save keeps it), or removes it when
+    /// empty. Returns false when the Keychain refused.
     @discardableResult public static func setOpenAIKey(_ key: String) -> Bool {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                    kSecAttrAccount as String: account]
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [errSecSuccess, errSecItemNotFound].contains(SecItemDelete(base as CFDictionary)) }
         let updated = SecItemUpdate(base as CFDictionary, [kSecValueData as String: Data(trimmed.utf8)] as CFDictionary)
-        guard updated == errSecItemNotFound else { return updated == errSecSuccess }
+        if updated == errSecSuccess { return true }
+        // An item an earlier (differently signed) build saved refuses the update: replace it as before.
+        if updated != errSecItemNotFound { SecItemDelete(base as CFDictionary) }
         var add = base
         add[kSecValueData as String] = Data(trimmed.utf8)
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock

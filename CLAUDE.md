@@ -87,7 +87,6 @@ Changing any of these means changing every side in the same commit.
 - A recording and a call both own `state.json`; run one at a time (the app enforces this for its own sessions).
 - Recording minute stamps count audio samples: a gap (an input device switch, the Mac sleeping) shifts later stamps earlier by its length.
 - Signing is ad-hoc unless `SIGN_IDENTITY` is set; an ad-hoc app runs only on the Mac that built it, and after each rebuild macOS may ask again for microphone and Keychain access, and Accessibility (dictation) has to be re-granted: the old grant stays pinned to the previous build's cdhash (tccd logs "Failed to match existing code requirement"), so run `tccutil reset Accessibility com.takeachangs.mike` and allow it again. The app logs that it skipped the key tap at `.error`.
-- Saving the key updates the Keychain item in place (a refused save keeps the old key), so an item an earlier differently-signed build saved may refuse the update where delete-and-add used to work (the wizard then says the Keychain didn't save it).
 - Dictation starts the mic on right-⌘ down, so a right-⌘ shortcut briefly lights the mic indicator. Its ⌘V is key code 9, V on ANSI layouts only.
 - `drive.py` ignores a running resident app, so with one up you see two notches during the drive.
 - `seconds` is null when `session.closed` never arrives within 5 s and no usage update came before.
