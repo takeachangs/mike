@@ -20,7 +20,8 @@ extension Notch {
                 tapNoted = true
                 Log.app.error("dictation off: no Accessibility access (after an ad-hoc rebuild: tccutil reset Accessibility com.takeachangs.mike, then allow again)")
             }
-            if !UserDefaults.standard.bool(forKey: "askedAccessibility") {  // the system prompt once; Settings shows it after
+            // The system prompt once; Settings shows it after. Before setup is done, its Dictation step asks instead.
+            if UserDefaults.standard.bool(forKey: "onboarded") && !UserDefaults.standard.bool(forKey: "askedAccessibility") {
                 UserDefaults.standard.set(true, forKey: "askedAccessibility")
                 _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
             }

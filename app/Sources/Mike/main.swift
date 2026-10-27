@@ -79,7 +79,7 @@ if resident {
     let testAudio = args.firstIndex(of: "--test-audio").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
     MainActor.assumeIsolated {
         if args.contains("--listen") { model.launch(listen: true, testAudio: testAudio) }
-        else if !UserDefaults.standard.bool(forKey: "onboarded") { Windows.settings(welcome: true) }
+        else if !UserDefaults.standard.bool(forKey: "onboarded") { Windows.setup() }
         model.installDictationTap()
     }
     // Until Accessibility is granted (or dictation turned on), keep trying, so it starts working without a relaunch.
@@ -94,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         MainActor.assumeIsolated {
             if resident && !model.open { model.setOpen(true) }
-            if !UserDefaults.standard.bool(forKey: "onboarded") { Windows.settings(welcome: true) }
+            if !UserDefaults.standard.bool(forKey: "onboarded") { Windows.setup() }
         }
         return false
     }

@@ -5,14 +5,15 @@ import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The app's two ordinary windows. The app is an accessory (no Dock icon), so opening one also activates the app.
+/// The app's ordinary windows. The app is an accessory (no Dock icon), so opening one also activates the app.
 @MainActor enum Windows {
     private static var open: [String: NSWindow] = [:]
 
     static func library() { show("library", "Library", CGSize(width: 900, height: 600), Library()) }
-    static func settings(welcome: Bool = false) {
-        if welcome { show("welcome", "Welcome to Mike", CGSize(width: 520, height: 500), SettingsView(welcome: true)) }
-        else { show("settings", "Settings", CGSize(width: 520, height: 440), SettingsView(welcome: false)) }
+    static func settings() { show("settings", "Settings", CGSize(width: 520, height: 440), SettingsView()) }
+    static func setup() {
+        if open["setup"]?.isVisible == false { open["setup"] = nil }  // a closed one starts over at Welcome
+        show("setup", "Welcome to Mike", CGSize(width: 760, height: 540), Setup())
     }
 
     private static func show(_ id: String, _ title: String, _ size: CGSize, _ view: some View) {
@@ -154,9 +155,8 @@ struct Detail: View {
 
 // ------------------------------------------------------------------------------------------------ settings
 
-/// Settings, also shown on first launch as the welcome screen: what the app needs and why.
+/// Settings: what the app needs and why. First launch shows Setup instead.
 struct SettingsView: View {
-    let welcome: Bool
     @State private var key = Keychain.stored ?? ""
     @State private var keySaved = Keychain.stored != nil
     @AppStorage("soundVolume") private var volume = 0.25
@@ -169,11 +169,6 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if welcome {
-                Text("Mike lives in your MacBook's notch. Click the notch to start a voice call or record a lecture; past sessions are in the Library.")
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding([.horizontal, .top], 20)
-            }
             TabView {
                 Form {
                     Section("Microphone") {
@@ -206,6 +201,7 @@ struct SettingsView: View {
                             .onChange(of: loginItem) { setLoginItem(loginItem) }
                             .disabled(Bundle.main.bundleIdentifier == nil)
                         LabeledContent("Data folder") { Button("Show in Finder") { NSWorkspace.shared.open(Paths.stateDir) } }
+                        LabeledContent("Setup") { Button("Run setup again…") { Windows.setup() } }
                         LabeledContent("Version") { Text(appVersion).foregroundStyle(.secondary) }
                     }
                 }
@@ -245,14 +241,6 @@ struct SettingsView: View {
                 }
                 .formStyle(.grouped)
                 .tabItem { Label("Call", systemImage: "phone") }
-            }
-            if welcome {
-                Button("Done") {
-                    UserDefaults.standard.set(true, forKey: "onboarded")
-                    NSApp.keyWindow?.close()
-                }
-                .keyboardShortcut(.defaultAction)
-                .padding(.bottom, 16)
             }
         }
         .onAppear { mic = AVCaptureDevice.authorizationStatus(for: .audio); trusted = AXIsProcessTrusted() }
