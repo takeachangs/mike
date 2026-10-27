@@ -44,7 +44,8 @@ struct Setup: View {
                         if i < step { Button { jump(to: i) } label: { railItem(i) }.buttonStyle(.plain) } else { railItem(i) }
                     }
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Step \(i + 1) of \(Self.steps.count), \(Self.steps[i])" + (i < step ? ", completed" : i == step ? ", current" : ""))
+                    // Numbered like the headers: Welcome and Done aren't steps
+                    .accessibilityLabel(Self.steps[i] + (i == 0 || i == 6 ? "" : ", step \(i) of 5") + (i < step ? ", completed" : i == step ? ", current" : ""))
                     .accessibilityAddTraits(i < step ? .isButton : [])
                 }
                 Spacer()
@@ -322,9 +323,13 @@ struct Setup: View {
         }
     }
 
+    /// No connection at all, here or in the underlying error; a timeout or a bad response is a different failure.
     func offline(_ error: Error) -> Bool {
-        let e = error as NSError
-        return e.domain == NSURLErrorDomain || (e.userInfo[NSUnderlyingErrorKey] as? NSError)?.domain == NSURLErrorDomain
+        let codes: [URLError.Code] = [.notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost,
+                                      .dataNotAllowed, .internationalRoamingOff]
+        return [error as NSError, (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError].contains {
+            $0?.domain == NSURLErrorDomain && codes.map(\.rawValue).contains($0!.code)
+        }
     }
 
     /// Checks the key with one free request (listing models) before saving it, unless the user chose to save anyway.
