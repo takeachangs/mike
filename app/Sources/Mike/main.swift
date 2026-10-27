@@ -24,7 +24,7 @@ if resident, let other = (try? String(contentsOf: Paths.appPID, encoding: .utf8)
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)  // no Dock icon; LSUIElement in Info.plist says the same for the bundle
-// Never shown (no menu bar for an accessory app), but ⌘X/C/V/A/Z in text fields (the API key) only work through it.
+// Shown only while a window is open (an accessory app has no menu bar), but ⌘X/C/V/A/Z in text fields (the API key) only work through it.
 app.mainMenu = {
     let edit = NSMenu(title: "Edit")
     edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
@@ -33,9 +33,13 @@ app.mainMenu = {
     edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
     edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
     edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-    let item = NSMenuItem(), main = NSMenu()
+    // The app menu slot comes first; it shows while a window makes the app regular (Windows.show), so ⌘Q quits there.
+    let appMenu = NSMenu()
+    appMenu.addItem(withTitle: "Quit Mike", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    let first = NSMenuItem(), item = NSMenuItem(), main = NSMenu()
+    first.submenu = appMenu
     item.submenu = edit
-    main.addItem(NSMenuItem())  // the app menu slot comes first
+    main.addItem(first)
     main.addItem(item)
     return main
 }()
