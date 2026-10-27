@@ -59,7 +59,7 @@ struct NotchView: View {
 
     func session(_ now: Date) -> some View {
         let s = m.live ? Int(now.timeIntervalSince(m.since)) : 0, recorder = m.recorderMode  // 00:00 while loading or connecting
-        let status = m.notice ?? (m.starting != nil ? (recorder ? m.progress.map { "Loading speech model \(Int($0 * 100))%" } ?? "Loading speech model" : "Connecting")
+        let status = m.notice ?? (m.starting != nil ? (recorder ? m.progress.map { "Downloading speech model \(Int($0 * 100))%" } ?? "Loading speech model" : "Connecting")
             : recorder ? (m.muted ? "Paused" : "Recording") : m.muted ? "Muted" : m.state.capitalized)
         return VStack(spacing: 10) {
             reveal(label(status, alert: m.notice != nil), after: 0.08)

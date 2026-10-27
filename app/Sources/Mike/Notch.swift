@@ -28,6 +28,7 @@ import SwiftUI
     // Dictation (Dictate.swift): the key tap and its rules, the capture, and the aura they light around the notch.
     var tap: CFMachPort?, keys = DictationKey(), dictation: Dictation?, transcribing = false, dictatedAt = Date.distantPast
     var dictationReady = false, tapNoted = false  // ready: mic live and model loaded, the circle and the start cue
+    var emptyDictations = 0  // transcriptions that finished with no words (Setup's Try it watches it)
     var aura = Spring(0, response: 0.4), spread = Spring(1, response: 0.4), sheen = Spring(0, response: 0.3), voice = 0.0
     var auraOut = 0.6  // how the aura leaves: slow and spreading after an insert, quick and drawn in after a cancel
     /// False when nothing is drawn or moving: the view's timeline pauses, so an idle app costs no frames.

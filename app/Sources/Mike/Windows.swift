@@ -12,10 +12,17 @@ import UniformTypeIdentifiers
     static func library() { show("library", "Library", CGSize(width: 900, height: 600), Library()) }
     static func settings() { show("settings", "Settings", CGSize(width: 520, height: 440), SettingsView()) }
     /// Kept (with its step) when closed mid-setup, so reopening resumes; only Done drops it.
-    static func setup() { show("setup", "Welcome to Mike", CGSize(width: 760, height: 540), Setup(), resizable: false) }
-    static func finishSetup() {
-        open["setup"]?.close()
-        open["setup"] = nil
+    static func setup() {
+        // Finishing leaves the last step in setupStep (clearing it there redraws Welcome during the close animation),
+        // so a new window after setup was finished ("Run setup again…") starts over; before that it resumes.
+        if open["setup"] == nil && UserDefaults.standard.bool(forKey: "onboarded") { UserDefaults.standard.removeObject(forKey: "setupStep") }
+        show("setup", "Welcome to Mike", CGSize(width: 760, height: 540), Setup(), resizable: false)
+    }
+    static var setupWindow: NSWindow? { open["setup"] }
+    /// `close` false: the window is already closing (its close button or ⌘W on the Done step).
+    static func finishSetup(close: Bool = true) {
+        let w = open.removeValue(forKey: "setup")
+        if close { w?.close() }
     }
 
     private static func show(_ id: String, _ title: String, _ size: CGSize, _ view: some View, resizable: Bool = true) {
@@ -273,11 +280,11 @@ struct SettingsView: View {
         model = "Downloading…"
         Task { @MainActor in
             do {
-                _ = try await Recorder.models { p in Task { @MainActor in model = "Downloading… \(Int(p.fractionCompleted * 100))%" } }
+                _ = try await Recorder.models { p in model = p.preparing ? "Preparing…" : "Downloading… \(Int(p.fraction * 100))%" }
                 model = "Ready"
             } catch {
                 model = nil
-                NSAlert(error: error).runModal()
+                if !(error is CancellationError) { NSAlert(error: error).runModal() }  // Setup's Cancel
             }
         }
     }

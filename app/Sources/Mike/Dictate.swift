@@ -14,6 +14,12 @@ extension Notch {
     /// Installs the key tap once Accessibility allows it. Called at launch and every few seconds after, so granting
     /// access in System Settings takes effect without a relaunch.
     func installDictationTap() {
+        // A revoked grant disables the tap for good, and re-granting doesn't enable it again: drop it and make a new one.
+        if let t = tap, !CGEvent.tapIsEnabled(tap: t), AXIsProcessTrusted() {
+            CFMachPortInvalidate(t)  // removes its run-loop source too
+            tap = nil
+            Log.app.info("dictation key tap was disabled, recreating it")
+        }
         guard tap == nil, Self.dictationOn else { return }
         guard AXIsProcessTrusted() else {
             if !tapNoted {  // persisted, so a lost grant (each ad-hoc rebuild) shows in `log show`
@@ -100,7 +106,7 @@ extension Notch {
                 do {
                     let text = try await d.finish()
                     auraOut = text.isEmpty ? 0.15 : 0.6
-                    if !text.isEmpty { paste(text) }
+                    if !text.isEmpty { paste(text) } else { emptyDictations += 1 }
                     (text.isEmpty ? Cue.pause : Cue.stop).play()  // capture has ended, so it is never transcribed
                 } catch {
                     auraOut = 0.15

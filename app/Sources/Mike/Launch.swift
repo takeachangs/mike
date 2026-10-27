@@ -28,7 +28,7 @@ extension Notch {
                 try Paths.ensureStateDir()
                 if testAudio == nil, !(await Self.microphoneAllowed()) { throw LaunchError.micDenied }
                 if listen {
-                    let models = try await Recorder.models { p in Task { @MainActor in self.progress = p.fractionCompleted } }
+                    let models = try await Recorder.models { p in self.progress = p.preparing ? nil : p.fraction }
                     if cancelled { throw CancellationError() }  // stopped during the download: never start
                     let r = try Recorder(output: Paths.newRecording())  // only now, so a failed download leaves no empty file
                     r.onError = { message in Task { @MainActor in self.say(message) } }
@@ -52,7 +52,7 @@ extension Notch {
                 }
             } catch {
                 starting = nil; progress = nil; call = nil
-                if !cancelled {
+                if !cancelled && !(error is CancellationError) {  // also Setup's Cancel on the model download
                     Log.app.error("could not start: \(error.localizedDescription, privacy: .public)")
                     say(error.localizedDescription)
                 }
